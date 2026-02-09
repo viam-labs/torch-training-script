@@ -4,7 +4,7 @@
 defaults:
   - model: faster_rcnn  # Choose: faster_rcnn, ssdlite, effnet, custom_detector
   - dataset: jsonl
-  - optimization_results: faster_rcnn  # Match the model you chose above
+  # - optimization_results: faster_rcnn  # Match the model you chose above
   - _self_
 
 # Experiment settings
