@@ -19,7 +19,7 @@ from datasets.viam_dataset import ViamDataset
 from models.faster_rcnn_detector import FasterRCNNDetector
 from models.ssdlite_detector import SSDLiteDetector
 from utils.coco_converter import jsonl_to_coco
-from utils.coco_eval import collect_predictions, evaluate_coco_predictions
+from utils.coco_eval import convert_to_xywh, evaluate_coco_predictions
 from utils.transforms import GPUCollate, build_transforms
 
 try:
@@ -179,7 +179,8 @@ def visualize_predictions(image,predictions,targets,cfg: DictConfig, title="", o
 
 def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     """
-    Evaluate model on test set, visualize samples, and collect predictions for COCO metrics.
+    Evaluate model on test set in a single pass: visualize samples, collect confidence
+    statistics, and gather COCO predictions.
     
     NOTE: This function collects ALL predictions (no confidence filtering) for COCO evaluation.
     The confidence threshold in cfg is only used for visualization.
@@ -196,17 +197,20 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     all_scores = []
     total_boxes = 0
     
+    # Collect COCO predictions (single pass — no second inference loop)
+    coco_results = []
+    
     with torch.no_grad():
-        for batch_idx, (data, targets) in enumerate(tqdm(data_loader, desc="Visualizing")):
-            model_output = model(data)
+        for batch_idx, (images, targets) in enumerate(tqdm(data_loader, desc="Evaluating")):
+            outputs = model(images)
             
             # Visualize random sample of images
-            for i in range(len(data)):
+            for i in range(len(images)):
                 global_image_idx = batch_idx * cfg.training.batch_size + i
                 if global_image_idx in images_to_plot:
                     visualize_predictions(
-                        data[i], 
-                        model_output[i],
+                        images[i], 
+                        outputs[i],
                         targets[i],
                         cfg=cfg,
                         output_dir=vis_dir, 
@@ -214,11 +218,45 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
                     )
                     images_to_plot.remove(global_image_idx)
             
-            # Collect confidence statistics
-            for pred in model_output:
-                if len(pred['scores']) > 0:
-                    all_scores.extend(pred['scores'].cpu().numpy())
-                    total_boxes += len(pred['scores'])
+            # Process each image's predictions for confidence stats and COCO collection
+            for img_idx, (target, output) in enumerate(zip(targets, outputs)):
+                # Confidence statistics
+                if len(output['scores']) > 0:
+                    all_scores.extend(output['scores'].cpu().numpy())
+                    total_boxes += len(output['scores'])
+                
+                if len(output['boxes']) == 0:
+                    continue
+                
+                # Collect COCO predictions
+                image_id = target['image_id'].item()
+                boxes = output['boxes'].cpu()
+                scores = output['scores'].cpu()
+                labels = output['labels'].cpu()
+                
+                # Scale boxes back to original image dimensions
+                if 'orig_size' in target:
+                    orig_size = target['orig_size']
+                    orig_h = orig_size[0].item() if torch.is_tensor(orig_size[0]) else orig_size[0]
+                    orig_w = orig_size[1].item() if torch.is_tensor(orig_size[1]) else orig_size[1]
+                    
+                    curr_h, curr_w = images[img_idx].shape[-2:]
+                    scale_h = orig_h / curr_h
+                    scale_w = orig_w / curr_w
+                    boxes = boxes.clone()
+                    boxes[:, [0, 2]] *= scale_w
+                    boxes[:, [1, 3]] *= scale_h
+                
+                # Convert boxes from [x1,y1,x2,y2] to COCO format [x,y,w,h]
+                boxes = convert_to_xywh(boxes)
+                
+                for box, score, label in zip(boxes, scores, labels):
+                    coco_results.append({
+                        'image_id': image_id,
+                        'category_id': label.item(),
+                        'bbox': box.tolist(),
+                        'score': score.item(),
+                    })
     
     # Log confidence score statistics
     if total_boxes > 0:
@@ -233,17 +271,7 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     else:
         log.warning("No predictions made!")
     
-    # Collect ALL predictions for COCO evaluation (no confidence filtering!)
-    # This matches the behavior during training
-    log.info("Collecting predictions for COCO evaluation (no confidence threshold applied)...")
-    predictions = collect_predictions(
-        model=model,
-        data_loader=data_loader,
-        device=device,
-        scale_to_original=True  # Scale back to original image coordinates
-    )
-    
-    return predictions
+    return coco_results
 
 @hydra.main(config_path="../configs", config_name="eval", version_base=None)
 def main(cfg: DictConfig):
