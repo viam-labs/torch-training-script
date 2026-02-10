@@ -118,6 +118,7 @@ class ViamDataset(Dataset):
         image_path = sample['image_path']
         
         # Resolve image path
+        # TODO: understand why I need to do this
         if os.path.isabs(image_path):
             full_path = Path(image_path)
         elif image_path.startswith(self.data_dir.name + '/'):
@@ -159,18 +160,15 @@ class ViamDataset(Dataset):
                 log.warning(f"Skipping invalid bbox in {image_path}: x_max <= x_min or y_max <= y_min")
                 continue
             
-            # Format: [x_min, y_min, x_max, y_max]
-            boxes.append([x_min, y_min, x_max, y_max])
-            
             # Map annotation label to category_id (1-based, 0 is background)
             label = bbox.get('annotation_label')
-            if label and label in self.label_to_id:
-                category_id = self.label_to_id[label]
-            else:
+            if not label or label not in self.label_to_id:
                 log.warning(f"Unknown annotation label '{label}' in {image_path}, skipping")
                 continue
             
-            labels.append(category_id)
+            # Format: [x_min, y_min, x_max, y_max]
+            boxes.append([x_min, y_min, x_max, y_max])
+            labels.append(self.label_to_id[label])
         
         # Ensure we have at least one box
         if len(boxes) == 0:
