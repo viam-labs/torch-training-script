@@ -19,7 +19,7 @@ class SSDLiteDetector(nn.Module):
         input_h, input_w = cfg.model.transform.input_size
         
         # Load model with proper weights enum
-        if cfg.model.pretrained:
+        if cfg.training.pretrained:
             weights = SSDLite320_MobileNet_V3_Large_Weights.COCO_V1
             self.model = ssdlite320_mobilenet_v3_large(weights=weights)
             
@@ -50,7 +50,7 @@ class SSDLiteDetector(nn.Module):
             size = (320, 320)
             in_channels = det_utils.retrieve_out_channels(self.model.backbone, size)
             
-            if cfg.model.pretrained:
+            if cfg.training.pretrained:
                 log.info("Transfer learning: Replacing classification head")
                 log.info("  - COCO classes: 91 (90 + background)")
                 log.info(f"  - Your classes: {cfg.model.num_classes + 1} ({cfg.model.num_classes} + background)")
@@ -64,7 +64,7 @@ class SSDLiteDetector(nn.Module):
                 norm_layer=nn.BatchNorm2d
             )
         else:
-            if cfg.model.pretrained:
+            if cfg.training.pretrained:
                 log.info("Using COCO classes (90), keeping all pretrained weights")
     
     def to(self, device):

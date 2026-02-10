@@ -11,12 +11,8 @@ transform:
   
 # num_classes is auto-computed from the 'classes' config at runtime
 
-# Pretrained weights configuration:
-# - pretrained: false → Uses transform.input_size above for model's internal transform
-# - pretrained: true  → Ignores config, uses COCO transform (800x1333) automatically
-# 
-# IMPORTANT: Dataset Resize in jsonl.yaml happens BEFORE model sees images
-# - pretrained: false → Dataset Resize to [800, 1333] matches model transform (good)
-# - pretrained: true  → Dataset Resize causes double-resize (see dataset/jsonl.yaml)
-pretrained: false
 backbone: mobilenet_v3_large_fpn
+
+# Faster R-CNN specific freeze options (only applies when training.pretrained=true)
+freeze_fpn: false  # Freeze Feature Pyramid Network
+freeze_rpn: false  # Freeze Region Proposal Network

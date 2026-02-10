@@ -380,7 +380,7 @@ def main(cfg: DictConfig):
     
     # Create model
     log.info(f"Creating model: {cfg.model.name}")
-    log.info(f"  Model config: pretrained={cfg.model.get('pretrained', False)}, num_classes={cfg.model.num_classes}")
+    log.info(f"  Model config: pretrained={cfg.training.get('pretrained', False)}, num_classes={cfg.model.num_classes}")
     if cfg.model.name == "faster_rcnn":
         model = FasterRCNNDetector(cfg).to(device)
         log.info("Faster R-CNN model created and moved to device")

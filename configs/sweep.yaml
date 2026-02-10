@@ -80,10 +80,7 @@ training:
   ema_decay: 0.9998  # EMA decay rate (0.9998 or 0.9999)
   
   # Transfer Learning: Layer Freezing
-  # NOTE: freeze_fpn and freeze_rpn only apply to Faster R-CNN
   freeze_backbone: false  # ALL MODELS
-  freeze_fpn: false       # FASTER R-CNN ONLY
-  freeze_rpn: false       # FASTER R-CNN ONLY
   freeze_all: false       # ALL MODELS
 
 # Logging

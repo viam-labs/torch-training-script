@@ -19,7 +19,7 @@ class FasterRCNNDetector(nn.Module):
         input_h, input_w = cfg.model.transform.input_size
         
         # Check if pretrained option exists in config
-        pretrained = cfg.model.get('pretrained', False)
+        pretrained = cfg.training.get('pretrained', False)
         
         if pretrained:
             # Load with pretrained weights

@@ -258,8 +258,8 @@ def main(cfg: DictConfig):
     # Apply transfer learning configuration (freezing layers if specified)
     freeze_config = {
         'freeze_backbone': cfg.training.get('freeze_backbone', False),
-        'freeze_fpn': cfg.training.get('freeze_fpn', False),
-        'freeze_rpn': cfg.training.get('freeze_rpn', False),
+        'freeze_fpn': cfg.model.get('freeze_fpn', False),
+        'freeze_rpn': cfg.model.get('freeze_rpn', False),
         'freeze_all': cfg.training.get('freeze_all', False),
     }
     configure_model_for_transfer_learning(model, cfg.model.name, freeze_config)
