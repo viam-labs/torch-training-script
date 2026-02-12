@@ -20,7 +20,6 @@ class ViamDataset(Dataset):
         jsonl_path: str, 
         data_dir: str, 
         classes: Optional[List[str]] = None,
-        transform=None
     ):
         """
         Args:
@@ -28,13 +27,12 @@ class ViamDataset(Dataset):
             data_dir: Directory containing images (or base directory if image_path is absolute)
             classes: List of annotation labels to include (e.g., ['triangle', 'person']). 
                     If None, includes all annotations found in the JSONL file.
-            transform: Optional transform to be applied to images (handled by GPUCollate)
         """
         self.data_dir = Path(data_dir)
-        self.transform = transform
         self.samples = []
         
         jsonl_path = Path(jsonl_path)
+        self.jsonl_path = jsonl_path
         if not jsonl_path.exists():
             raise FileNotFoundError(f"JSONL file not found: {jsonl_path}")
         
@@ -106,6 +104,10 @@ class ViamDataset(Dataset):
         
         log.info(f"Loaded {len(self.samples)} images with annotations from specified classes")
     
+    def get_classes(self) -> List[str]:
+        """Return sorted list of class names."""
+        return sorted(self.label_to_id.keys())
+    
     def __len__(self):
         return len(self.samples)
     
@@ -114,10 +116,13 @@ class ViamDataset(Dataset):
         image_path = sample['image_path']
         
         # Resolve image path
-        # If image_path is absolute or starts with dataset prefix, use as-is
-        # Otherwise, join with data_dir
-        if os.path.isabs(image_path) or image_path.startswith(self.data_dir.name + '/'):
+        # TODO: understand why I need to do this
+        if os.path.isabs(image_path):
             full_path = Path(image_path)
+        elif image_path.startswith(self.data_dir.name + '/'):
+            # image_path is like "dataset_dir_name/data/file.jpg"
+            # Resolve relative to data_dir's parent so it becomes an absolute path
+            full_path = self.data_dir.parent / image_path
         else:
             full_path = self.data_dir / os.path.basename(image_path)
         
@@ -153,18 +158,15 @@ class ViamDataset(Dataset):
                 log.warning(f"Skipping invalid bbox in {image_path}: x_max <= x_min or y_max <= y_min")
                 continue
             
-            # Format: [x_min, y_min, x_max, y_max]
-            boxes.append([x_min, y_min, x_max, y_max])
-            
             # Map annotation label to category_id (1-based, 0 is background)
             label = bbox.get('annotation_label')
-            if label and label in self.label_to_id:
-                category_id = self.label_to_id[label]
-            else:
+            if not label or label not in self.label_to_id:
                 log.warning(f"Unknown annotation label '{label}' in {image_path}, skipping")
                 continue
             
-            labels.append(category_id)
+            # Format: [x_min, y_min, x_max, y_max]
+            boxes.append([x_min, y_min, x_max, y_max])
+            labels.append(self.label_to_id[label])
         
         # Ensure we have at least one box
         if len(boxes) == 0:
@@ -180,7 +182,8 @@ class ViamDataset(Dataset):
         target = {
             'boxes': boxes,
             'labels': labels,
-            'image_id': torch.tensor([idx])  # Use dataset index as image_id
+            'image_id': torch.tensor([idx]),  # Use dataset index as image_id
+            'orig_size': torch.tensor([img_height, img_width])  # Original image dimensions [H, W]
         }
         
         # Note: Transforms are applied by GPUCollate, not here

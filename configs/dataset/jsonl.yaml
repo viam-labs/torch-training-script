@@ -1,27 +1,45 @@
 name: jsonl
 
 # Dataset paths
-# Update these paths to point to your dataset location
+# Each directory must contain: dataset.jsonl + data/ (with images)
+# Example structure:
+#   my_dataset/
+#     dataset.jsonl
+#     data/
+#       image1.jpg
+#       image2.jpg
 data:
-  train_jsonl: path/to/dataset.jsonl  # Path to training JSONL file
-  train_data_dir: path/to/data  # Directory containing training images
-  val_jsonl: path/to/dataset.jsonl  # Path to validation JSONL file (can be same file with split)
-  val_data_dir: path/to/data  # Directory containing validation images
-  test_jsonl: path/to/dataset.jsonl  # Path to test JSONL file
-  test_data_dir: path/to/data  # Directory containing test images
-  # test_annotations_coco: path/to/annotations.json  # Optional: Pre-converted COCO format ground truth
+  train_dir: null   # Required: directory containing dataset.jsonl + data/
+  val_dir: null     # Optional: if null, auto-split from train_dir (see training.val_split)
 
 # Transform configuration
-# Note: Transforms are applied via GPUCollate in the dataloader
+# Note: Transforms are applied via GPUCollate in the dataloader BEFORE model.forward()
+#
+# NORMALIZATION: DO NOT add Normalize here!
+# All torchvision detection models (Faster R-CNN, SSDLite) have a built-in
+# GeneralizedRCNNTransform that handles normalization AND resize internally.
+# Adding Normalize here would cause DOUBLE normalization → broken model output.
+#
+# RESIZE: Keep Resize here for batching.
+# Images in a batch must be the same size for torch.stack(). The model's internal
+# transform will then see already-resized images and essentially skip its own resize.
+#
+# AUGMENTATIONS: Add augmentations here (flip, rotation, jitter, etc.)
+# The model does NOT do augmentations — that's the dataloader's job.
+#
+# RECOMMENDATION:
+#   - Set model.transform.input_size to match the model's expected size
+#   - Faster R-CNN pretrained: [800, 1333]
+#   - SSDLite pretrained: [320, 320]
+#   - Training from scratch: Any size you want
 transform:
   train:
+    # Resize is REQUIRED for batching. Should match model's internal transform size.
+    # ${model.transform.input_size} automatically adapts to your model config
     - name: Resize
       params:
         size: ${model.transform.input_size}
-    - name: Normalize
-      params:
-        mean: [0.485, 0.456, 0.406]
-        std: [0.229, 0.224, 0.225]
+    # Augmentations (uncomment as needed):
     # - name: RandomRotation
     #   params: 
     #     degrees: 10 
@@ -52,17 +70,8 @@ transform:
     - name: Resize
       params:
         size: ${model.transform.input_size}
-    - name: Normalize
-      params: 
-        mean: [0.485, 0.456, 0.406]
-        std: [0.229, 0.224, 0.225]
         
   test:
     - name: Resize
       params:
         size: ${model.transform.input_size}
-    - name: Normalize
-      params:
-        mean: [0.485, 0.456, 0.406]
-        std: [0.229, 0.224, 0.225]
-

@@ -3,9 +3,14 @@ Utility to convert JSONL format to COCO format for evaluation.
 """
 import json
 import logging
+import os
 from pathlib import Path
+from typing import TYPE_CHECKING, List, Optional
+
 from PIL import Image
-from typing import Optional, List
+
+if TYPE_CHECKING:
+    from datasets.viam_dataset import ViamDataset
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +82,6 @@ def jsonl_to_coco(
     
     log.info(f"Creating COCO format with {len(classes)} categories: {classes}")
     
-    image_id_to_idx = {}
     annotation_id = 1
     
     with open(jsonl_path, 'r') as f:
@@ -98,9 +102,12 @@ def jsonl_to_coco(
                 continue
             
             # Resolve image path (same logic as ViamDataset)
-            import os
-            if os.path.isabs(image_path) or image_path.startswith(data_dir.name + '/'):
+            if os.path.isabs(image_path):
                 full_path = Path(image_path)
+            elif image_path.startswith(data_dir.name + '/'):
+                # image_path is like "dataset_dir_name/data/file.jpg"
+                # Resolve relative to data_dir's parent so it becomes an absolute path
+                full_path = data_dir.parent / image_path
             else:
                 full_path = data_dir / os.path.basename(image_path)
             
@@ -122,10 +129,7 @@ def jsonl_to_coco(
             
             # Add image entry
             # Use relative path if possible, otherwise just filename
-            if not os.path.isabs(image_path) and not image_path.startswith(data_dir.name + '/'):
-                file_name = os.path.basename(image_path)
-            else:
-                file_name = Path(image_path).name
+            file_name = Path(image_path).name
             
             coco_data["images"].append({
                 "id": image_id,
@@ -134,17 +138,12 @@ def jsonl_to_coco(
                 "height": img_height
             })
             
-            image_id_to_idx[image_id] = len(coco_data["images"]) - 1
-            
             # Filter annotations to only include specified classes
             bounding_boxes = data.get('bounding_box_annotations', [])
-            if classes is not None:
-                filtered_boxes = [
-                    bbox for bbox in bounding_boxes
-                    if bbox.get('annotation_label') in label_to_id
-                ]
-            else:
-                filtered_boxes = bounding_boxes
+            filtered_boxes = [
+                bbox for bbox in bounding_boxes
+                if bbox.get('annotation_label') in label_to_id
+            ]
             
             # Add annotations
             for bbox in filtered_boxes:
@@ -195,5 +194,132 @@ def jsonl_to_coco(
         json.dump(coco_data, f, indent=2)
     
     log.info(f"Converted {len(coco_data['images'])} images and {len(coco_data['annotations'])} annotations to COCO format")
+    return str(output_path)
+
+
+def dataset_to_coco(
+    dataset: 'ViamDataset',
+    indices: List[int],
+    output_path: str,
+) -> str:
+    """
+    Generate COCO format ground truth directly from a ViamDataset's samples at
+    the given indices. Used when the validation set is an auto-split subset of
+    the training dataset (no separate JSONL file on disk).
+
+    The image_id for each entry equals the original dataset index so that it
+    matches the image_id returned by ViamDataset.__getitem__ (which also uses
+    the dataset index). This keeps COCO evaluation consistent.
+
+    Args:
+        dataset: The ViamDataset instance containing all samples.
+        indices: List of sample indices to include (e.g. val split indices).
+        output_path: Path to save the COCO format JSON file.
+
+    Returns:
+        Path to the created COCO format file.
+    """
+    output_path = Path(output_path)
+
+    # Build categories from the dataset's label mapping
+    categories = [
+        {
+            "id": cat_id,
+            "name": label,
+            "supercategory": "none",
+        }
+        for label, cat_id in sorted(dataset.label_to_id.items(), key=lambda x: x[1])
+    ]
+
+    coco_data = {
+        "images": [],
+        "annotations": [],
+        "categories": categories,
+    }
+
+    annotation_id = 1
+
+    for idx in indices:
+        sample = dataset.samples[idx]
+        image_path = sample["image_path"]
+
+        # Resolve full path (same logic as ViamDataset.__getitem__)
+        if os.path.isabs(image_path):
+            full_path = Path(image_path)
+        elif image_path.startswith(dataset.data_dir.name + "/"):
+            full_path = dataset.data_dir.parent / image_path
+        else:
+            full_path = dataset.data_dir / os.path.basename(image_path)
+
+        if not full_path.exists():
+            log.warning(f"Image not found: {full_path}, skipping")
+            continue
+
+        # Get image dimensions
+        try:
+            with Image.open(full_path) as img:
+                img_width, img_height = img.size
+        except Exception as e:
+            log.warning(f"Could not open image {full_path}: {e}, skipping")
+            continue
+
+        # image_id must match ViamDataset.__getitem__ which returns idx
+        image_id = idx
+        file_name = Path(image_path).name
+
+        coco_data["images"].append({
+            "id": image_id,
+            "file_name": file_name,
+            "width": img_width,
+            "height": img_height,
+        })
+
+        # Convert bounding boxes
+        for bbox in sample["boxes"]:
+            x_min_norm = bbox.get("x_min_normalized")
+            y_min_norm = bbox.get("y_min_normalized")
+            x_max_norm = bbox.get("x_max_normalized")
+            y_max_norm = bbox.get("y_max_normalized")
+
+            if None in [x_min_norm, y_min_norm, x_max_norm, y_max_norm]:
+                continue
+
+            x_min = x_min_norm * img_width
+            y_min = y_min_norm * img_height
+            x_max = x_max_norm * img_width
+            y_max = y_max_norm * img_height
+
+            if x_max <= x_min or y_max <= y_min:
+                continue
+
+            width = x_max - x_min
+            height = y_max - y_min
+            area = width * height
+
+            label = bbox.get("annotation_label")
+            if label and label in dataset.label_to_id:
+                category_id = dataset.label_to_id[label]
+            else:
+                continue
+
+            coco_data["annotations"].append({
+                "id": annotation_id,
+                "image_id": image_id,
+                "category_id": category_id,
+                "bbox": [x_min, y_min, width, height],
+                "area": area,
+                "iscrowd": 0,
+            })
+            annotation_id += 1
+
+    # Save COCO format file
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w") as f:
+        json.dump(coco_data, f, indent=2)
+
+    log.info(
+        f"Created COCO GT from dataset subset: {len(coco_data['images'])} images, "
+        f"{len(coco_data['annotations'])} annotations"
+    )
     return str(output_path)
 

@@ -1,284 +1,374 @@
-#trainign script for all models except yolo
+#training script for object detection models
 import gc
 import logging
+import math
+import sys
 from pathlib import Path
 
 import hydra
 import torch
 import torch.multiprocessing as mp
-import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader
+from pycocotools.coco import COCO
+from torch.utils.data import DataLoader, random_split
 from torch.utils.tensorboard import SummaryWriter
-from torchinfo import summary
 from tqdm import tqdm
 
 from datasets.viam_dataset import ViamDataset
-from models.custom_detector import SimpleDetector
-from models.effnet_detector import EfficientNetDetector
 from models.faster_rcnn_detector import FasterRCNNDetector
 from models.ssdlite_detector import SSDLiteDetector
-from utils.transforms import GPUCollate, build_transforms
+from utils.coco_converter import dataset_to_coco, jsonl_to_coco
+from utils.coco_eval import evaluate_coco
+from utils.freeze import configure_model_for_transfer_learning
+from utils.model_ema import ModelEMA
+from utils.seed import set_seed
+from utils.transforms import DetectionTransform, GPUCollate
 
 log = logging.getLogger(__name__)
 
 OmegaConf.register_new_resolver("eval", eval)
-def train_model(model, train_loader, val_loader, optimizer, scheduler, device, cfg: DictConfig):
-    # Create tensorboard writer using Hydra's output directory
-    writer = SummaryWriter(Path(cfg.logging.save_dir) / 'tensorboard')  # Use Hydra's output directory
+
+
+def train_one_epoch(model, optimizer, data_loader, epoch, cfg, model_ema=None):
+    """
+    Train for one epoch. Matches PyTorch Vision reference implementation.
     
-    # Training loop
-    best_val_loss = float('inf')
-    patience_counter = 0
+    Args:
+        model: The model to train
+        optimizer: Optimizer
+        data_loader: Training data loader
+        epoch: Current epoch number
+        cfg: Hydra config
+        model_ema: Optional EMA model
+        
+    Returns:
+        Dict with:
+            - 'loss' (float): Average total training loss over the epoch.
+            - 'loss_dict' (dict[str, float]): Average per-component losses (e.g. loss_box_reg,
+              loss_classifier, loss_objectness), keyed by the model's loss names.
+    """
+    model.train()
     
-    for epoch in range(cfg.training.num_epochs):
-        # Training phase
-        model.train()
-        train_loss = 0.0
-        train_losses = {'loss_classifier': 0.0,
-                        'loss_box_reg': 0.0,
-                        'loss_objectness': 0.0,
-                        'loss_rpn_box_reg': 0.0}
-                        
-        train_pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{cfg.training.num_epochs} [Train]')
-        for batch_idx, (data, targets) in enumerate(train_pbar):
-            optimizer.zero_grad()
-
-            if cfg.model.name in ["faster_rcnn", "ssdlite"]: #for torchvision models: they return a Dict[Tensor] which contains classification and regression losses
-                loss_dict = model(data, targets)
-                loss = (
-                loss_dict['loss_classifier'] * cfg.training.loss.cls_loss_weight +
-                loss_dict['loss_box_reg'] * cfg.training.loss.box_loss_weight +
-                loss_dict['loss_objectness'] * cfg.training.loss.rpn_loss_weight +
-                loss_dict['loss_rpn_box_reg'] * cfg.training.loss.rpn_box_reg_loss_weight
-                ) #sum of classification and regression losses according to weights 
-            
-            elif cfg.model.name in ["effnet", "custom_detector"]: # For custom models that don't compute loss internally
-                outputs = model(data, targets)
-                # Compute loss manually
-                boxes_pred = outputs['boxes']  # Shape: [batch_size, 4]
-                scores_pred = outputs['scores']  # Shape: [batch_size, num_classes]
-                
-                # For effnet/custom_detector: they predict 1 box per image
-                # Use the first target box from each image as ground truth
-                target_boxes = torch.stack([t['boxes'][0] for t in targets], dim=0)  # [batch_size, 4]
-                target_labels = torch.stack([t['labels'][0] for t in targets], dim=0)  # [batch_size]
-                
-                # Simple MSE loss for boxes and CE loss for classification
-                box_loss = nn.functional.mse_loss(boxes_pred, target_boxes)
-                cls_loss = nn.functional.cross_entropy(scores_pred, target_labels - 1)  # -1 because labels are 1-indexed
-                
-                loss = box_loss * cfg.training.loss.box_loss_weight + cls_loss * cfg.training.loss.cls_loss_weight
-                
-                # Create loss_dict for logging
-                loss_dict = {
-                    'loss_classifier': cls_loss,
-                    'loss_box_reg': box_loss,
-                    'loss_objectness': torch.tensor(0.0, device=device),
-                    'loss_rpn_box_reg': torch.tensor(0.0, device=device)
-                }
-            else:
-                raise ValueError(f"Unknown model name: {cfg.model.name}")
-
-            loss.backward()
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) # gradient clipping to avoid exploding gradients
-            optimizer.step()
-            train_loss += loss.item() #maintain running loss total 
-
-            # Log individual losses per batch to tensorboard
-            for loss_name, loss_value in loss_dict.items():
-                train_losses[loss_name] += loss_value.item()
-                writer.add_scalar(f'BatchLoss/{loss_name}', loss_value.item(), 
-                                epoch * len(train_loader) + batch_idx)
-
-                # Update progress bar
-            train_pbar.set_postfix({'train loss this batch': loss.item()})
-
-        avg_losses = {k: v/len(train_loader) for k, v in train_losses.items()}
-        avg_train_loss = sum(avg_losses.values())
-        avg_train_loss = train_loss / len(train_loader) 
-        # Run validation for all model types
-        avg_val_loss = evaluate_validation(model, val_loader, device, epoch, cfg)
-
-        scheduler.step(avg_val_loss)
-
-        # Log epoch metrics to tensorboard
-        writer.add_scalar('Loss/train', avg_train_loss, epoch)
-        writer.add_scalar('Loss/val', avg_val_loss, epoch)
+    # PyTorch reference: Warmup only in epoch 0
+    warmup_scheduler = None
+    if epoch == 0:
+        #TODO: change number of iterations to 10% of train set or something like that
+        warmup_factor = cfg.training.get('warmup_factor', 0.001)  # 1/1000
+        warmup_iters = min(cfg.training.get('warmup_iters', 1000), len(data_loader) - 1)
         
-        # Log learning rate
-        writer.add_scalar('Learning_rate', optimizer.param_groups[0]['lr'], epoch)
-        
-        # Log epoch metrics
-        log.info(f'Epoch {epoch+1}/{cfg.training.num_epochs}: '
-                f'Avg Train Loss: {avg_train_loss:.4f}, '
-                f'Avg Val Loss: {avg_val_loss:.4f}')
-
-        # Save checkpoint
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-            checkpoint_path = Path(cfg.logging.save_dir) / 'best_model.pth'
-            torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_loss': avg_val_loss,
-            }, checkpoint_path)
-            patience_counter = 0
-        else:
-             patience_counter += 1
-        
-        #early stopping
-        if patience_counter >= cfg.training.early_stopping_patience: #10 epochs without improvement 
-            log.info(f'Early stopping triggered after {epoch + 1} epochs')
-            break
-
-    writer.close()
-    return best_val_loss  # for optuna to minimize the validation loss 
-
-def evaluate_validation(model, val_loader, device, epoch, cfg: DictConfig):
+        warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+            optimizer,
+            start_factor=warmup_factor,
+            total_iters=warmup_iters
+        )
+        log.info(f"Epoch 0: Applying warmup for {warmup_iters} iterations (start_factor={warmup_factor})")
     
-    was_training = model.training #boolean flag to return model to mode it was in before evaluation
+    train_loss = 0.0
+    train_losses = {}  # Dynamic loss tracking - will auto-populate based on model's loss keys
+    
+    pbar = tqdm(data_loader, desc=f'Epoch {epoch+1} [Train]')
+    
+    for batch_idx, (images, targets) in enumerate(pbar):
+        # Forward pass - model returns loss dict in training mode
+        loss_dict = model(images, targets)
 
-    # force loss-returning behavior for torchvision models
-    if cfg.model.name in ["faster_rcnn", "ssdlite"]:
-        model.train()
-        # workaround to freeze batchnorm and dropout layers to avoid training them
-        for m in model.modules():
-            if isinstance(m, (torch.nn.BatchNorm2d, torch.nn.Dropout)):
-                m.eval()
-    else:
-        model.eval()
 
+        #TODO: add weights here as hyperparameters
+        losses = sum(loss for loss in loss_dict.values())
+        
+        loss_value = losses.item()
+        if not math.isfinite(loss_value):
+            log.error(f"Loss is {loss_value}, stopping training")
+            log.error(f"Loss dict: {loss_dict}")
+            sys.exit(1)
+        
+        # Backward pass
+        optimizer.zero_grad()
+        losses.backward()
+        
+        # Gradient clipping (optional, PyTorch reference doesn't use it by default)
+        if cfg.training.get('gradient_clip', 0.0) > 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.training.gradient_clip)
+        
+        optimizer.step()
+        
+        # Update EMA after optimizer step
+        if model_ema is not None:
+            model_ema.update(model)
+        
+        # PyTorch reference: Warmup scheduler only in epoch 0, stepped per-iteration
+        if warmup_scheduler is not None:
+            warmup_scheduler.step()
+        
+        # Accumulate losses for logging (dynamic keys for different model architectures)
+        train_loss += loss_value
+        for k, v in loss_dict.items():
+            if k not in train_losses:
+                train_losses[k] = 0.0
+            train_losses[k] += v.item()
+        
+        # Update progress bar
+        pbar.set_postfix({
+            'loss': f'{loss_value:.4f}',
+            'lr': f'{optimizer.param_groups[0]["lr"]:.6f}'
+        })
+    
+    # Average losses
+    avg_train_loss = train_loss / len(data_loader)
+    avg_losses = {k: v / len(data_loader) for k, v in train_losses.items()}
+    
+    return {
+        'loss': avg_train_loss,
+        'loss_dict': avg_losses
+    }
+
+
+def evaluate_loss(model, data_loader, device, epoch, cfg):
+    """
+    Evaluate validation loss. Keeps model in train mode but freezes BatchNorm/Dropout.
+    This allows computing loss during validation (detection models don't compute loss in eval mode).
+    
+    Args:
+        model: The model to evaluate
+        data_loader: Validation data loader
+        device: Device to evaluate on
+        epoch: Current epoch number
+        cfg: Hydra config
+        
+    Returns:
+        Average validation loss
+    """
+    was_training = model.training
+    
+    # Keep model in train mode to get loss dict, but freeze BatchNorm/Dropout
+    model.train()
+    for m in model.modules():
+        if isinstance(m, (torch.nn.BatchNorm2d, torch.nn.Dropout)):
+            m.eval()
+    
     val_loss = 0.0
+    
     with torch.no_grad():
-        for batch_idx, (images, targets) in enumerate(val_loader):
-            if cfg.model.name in ["faster_rcnn", "ssdlite"]:
-                loss_dict = model(images, targets)
-                batch_loss = sum(loss_dict.values()).item()
-            elif cfg.model.name in ["effnet", "custom_detector"]:
-                outputs = model(images, targets)
-                boxes_pred = outputs['boxes']  # [batch_size, 4]
-                scores_pred = outputs['scores']  # [batch_size, num_classes]
-                
-                # Use the first target box from each image
-                target_boxes = torch.stack([t['boxes'][0] for t in targets], dim=0)  # [batch_size, 4]
-                target_labels = torch.stack([t['labels'][0] for t in targets], dim=0)  # [batch_size]
-                
-                # Simple MSE loss for boxes and CE loss for classification
-                box_loss = nn.functional.mse_loss(boxes_pred, target_boxes)
-                cls_loss = nn.functional.cross_entropy(scores_pred, target_labels - 1)
-                
-                batch_loss = (box_loss * cfg.training.loss.box_loss_weight + 
-                            cls_loss * cfg.training.loss.cls_loss_weight).item()
-            else:
-                raise ValueError(f"Unknown model name: {cfg.model.name}")
-            
+        for images, targets in data_loader:
+            loss_dict = model(images, targets)
+            batch_loss = sum(loss_dict.values()).item()
             val_loss += batch_loss
     
-    # back to original mode 
+    # Restore original training state
     model.train(was_training)
     
-    return val_loss / len(val_loader)
+    return val_loss / len(data_loader)
+
+
+# COCO evaluation functions moved to utils/coco_eval.py for reuse
+
+
+def prepare_data(cfg: DictConfig):
+    """Resolve data paths, discover classes, and create train/val datasets.
+
+    Mutates cfg in-place:
+      - Resolves relative data directory paths to absolute
+      - Sets cfg.model.num_classes
+
+    Returns:
+        (train_dataset, val_dataset) — val_dataset may be a Subset (auto-split)
+        or a ViamDataset (separate val_dir).
+    """
+    from hydra.utils import get_original_cwd
+    original_cwd = Path(get_original_cwd())
+
+    # Resolve relative data directory paths
+    # (Hydra changes CWD to output dir, so relative paths in config would break)
+    OmegaConf.set_struct(cfg, False)
+    for key in ['train_dir', 'val_dir', 'test_dir']:
+        val = cfg.dataset.data.get(key)
+        if val and not Path(val).is_absolute():
+            resolved = str(original_cwd / val)
+            cfg.dataset.data[key] = resolved
+            log.info(f"Resolved {key}: {val} -> {resolved}")
+
+    # Validate training directory
+    # Convention: <dir>/dataset.jsonl and <dir>/data/
+    train_dir = Path(cfg.dataset.data.train_dir)
+    if not train_dir.exists():
+        raise FileNotFoundError(f"Training directory not found: {train_dir}")
+    train_jsonl = train_dir / "dataset.jsonl"
+    train_data_dir = train_dir / "data"
+    if not train_jsonl.exists():
+        raise FileNotFoundError(f"dataset.jsonl not found in {train_dir}")
+    if not train_data_dir.exists():
+        raise FileNotFoundError(f"data/ directory not found in {train_dir}")
+
+    # Validate optional validation directory
+    val_dir_str = cfg.dataset.data.get('val_dir')
+    has_separate_val = val_dir_str is not None
+    val_jsonl = None
+    val_data_dir = None
+    if has_separate_val:
+        val_dir = Path(val_dir_str)
+        if not val_dir.exists():
+            raise FileNotFoundError(f"Validation directory not found: {val_dir}")
+        val_jsonl = val_dir / "dataset.jsonl"
+        val_data_dir = val_dir / "data"
+        if not val_jsonl.exists():
+            raise FileNotFoundError(f"dataset.jsonl not found in {val_dir}")
+        if not val_data_dir.exists():
+            raise FileNotFoundError(f"data/ directory not found in {val_dir}")
+
+    # Determine classes BEFORE model creation (model needs correct num_classes)
+    classes = cfg.get('classes', None)
+    if classes is None:
+        log.info("No classes specified in config. Auto-discovering from training data...")
+        temp_dataset = ViamDataset(
+            jsonl_path=str(train_jsonl),
+            data_dir=str(train_data_dir),
+            classes=None,
+        )
+        classes = temp_dataset.get_classes()
+        cfg.classes = classes
+        log.info(f"Auto-discovered {len(classes)} classes: {classes}")
+
+    cfg.model.num_classes = len(classes)
+    OmegaConf.set_struct(cfg, True)
+
+    # Create datasets
+    # When val_dir is provided: separate train and val ViamDatasets
+    # When val_dir is null: single ViamDataset, auto-split into train/val subsets
+    if has_separate_val:
+        log.info(f"Using separate validation dataset from: {val_dir_str}")
+        train_dataset = ViamDataset(
+            jsonl_path=str(train_jsonl),
+            data_dir=str(train_data_dir),
+            classes=classes,
+        )
+        val_dataset = ViamDataset(
+            jsonl_path=str(val_jsonl),
+            data_dir=str(val_data_dir),
+            classes=classes,
+        )
+    else:
+        val_split = cfg.training.get('val_split', 0.2)
+        log.info(f"No val_dir provided. Auto-splitting training data with val_split={val_split}")
+
+        full_dataset = ViamDataset(
+            jsonl_path=str(train_jsonl),
+            data_dir=str(train_data_dir),
+            classes=classes,
+        )
+
+        total_size = len(full_dataset)
+        val_size = int(total_size * val_split)
+        train_size = total_size - val_size
+
+        if val_size == 0:
+            raise ValueError(
+                f"val_split={val_split} results in 0 validation samples "
+                f"(total={total_size}). Increase val_split or provide a val_dir."
+            )
+
+        split_generator = torch.Generator().manual_seed(cfg.experiment.seed)
+        train_dataset, val_dataset = random_split(
+            full_dataset, [train_size, val_size], generator=split_generator
+        )
+
+        log.info(f"Auto-split: {train_size} train / {val_size} val samples (from {total_size} total)")
+
+    return train_dataset, val_dataset
+
+
+def create_coco_gt(val_dataset, output_path, classes):
+    """Create COCO ground truth JSON from the validation dataset.
+
+    Handles both dataset configurations:
+      - Auto-split: val_dataset is a torch Subset — uses .dataset (the underlying
+        ViamDataset) and .indices to call dataset_to_coco().
+      - Separate val dir: val_dataset is a ViamDataset — uses its .jsonl_path
+        and .data_dir to call jsonl_to_coco().
+
+    Args:
+        val_dataset: The validation dataset (Subset or ViamDataset).
+        output_path: Path to write the COCO format JSON file.
+        classes: List of class names.
+
+    Returns:
+        pycocotools.coco.COCO object loaded from the generated file.
+    """
+    from torch.utils.data import Subset
+
+    if isinstance(val_dataset, Subset):
+        # Auto-split case: val_dataset wraps a ViamDataset
+        dataset_to_coco(
+            dataset=val_dataset.dataset,
+            indices=list(val_dataset.indices),
+            output_path=output_path,
+        )
+    elif isinstance(val_dataset, ViamDataset):
+        # Separate val_dir case
+        jsonl_to_coco(
+            jsonl_path=str(val_dataset.jsonl_path),
+            data_dir=str(val_dataset.data_dir),
+            output_path=output_path,
+            classes=classes,
+        )
+    else:
+        raise TypeError(f"Unexpected val_dataset type: {type(val_dataset)}")
+
+    coco_gt = COCO(str(output_path))
+    log.info(f"COCO ground truth created: {len(coco_gt.imgs)} images, {len(coco_gt.anns)} annotations")
+    return coco_gt
+
 
 @hydra.main(config_path="../configs", config_name="train", version_base=None)
 def main(cfg: DictConfig):
-    # Set multiprocessing start method to 'spawn' for CUDA compatibility
-    # On macOS, 'spawn' is default, but we only set it if not already set
-    try:
-        mp.set_start_method('spawn', force=False)
-    except RuntimeError:
-        # Already set, ignore
-        pass
+    """Main training function."""
     
-    # Log config
     log.info(f"check device: {torch.cuda.is_available()}")
-    log.info(f"config: \n{OmegaConf.to_yaml(cfg)}")
     
-    torch.manual_seed(cfg.experiment.seed)
-    # Device selection with fallback: CUDA -> MPS -> CPU
-    requested_device = cfg.model.device
-    if requested_device == "cuda":
-        if torch.cuda.is_available():
-            device = torch.device("cuda")
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            log.warning("CUDA requested but not available. Falling back to MPS (macOS GPU).")
-            device = torch.device("mps")
-            cfg.model.device = "mps"
-        else:
-            log.warning("CUDA requested but not available. Falling back to CPU.")
-            device = torch.device("cpu")
-            cfg.model.device = "cpu"
-    elif requested_device == "mps":
-        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            device = torch.device("mps")
-        else:
-            log.warning("MPS requested but not available. Falling back to CPU.")
-            device = torch.device("cpu")
-            cfg.model.device = "cpu"
+    # Set random seed for reproducibility
+    set_seed(cfg.experiment.seed)
+    log.info(f"Set random seed to {cfg.experiment.seed} for reproducibility")
+    
+    # CUDA multiprocessing: Set spawn method to avoid fork issues
+    if torch.cuda.is_available():
+        try:
+            mp.set_start_method('spawn', force=True)
+        except RuntimeError:
+            pass  # Already set
+    
+    # Device selection: CUDA > CPU
+    if torch.cuda.is_available():
+        device = torch.device('cuda')
     else:
-        device = torch.device(requested_device)
+        log.warning("CUDA not available. Falling back to CPU.")
+        device = torch.device('cpu')
+    
     log.info(f"Using device: {device}")
     
-    # Get classes from top-level config
-    classes = cfg.get('classes', None)
+    # Resolve paths, discover classes, create datasets
+    train_dataset, val_dataset = prepare_data(cfg)
     
-    # If classes not specified, discover from training dataset
-    if classes is None:
-        log.info("Classes not specified in config, auto-discovering from training dataset...")
-        temp_dataset = ViamDataset(
-            jsonl_path=cfg.dataset.data.train_jsonl,
-            data_dir=cfg.dataset.data.train_data_dir,
-            classes=None,  # Will trigger auto-discovery
-        )
-        # Get discovered classes from dataset
-        classes = sorted(temp_dataset.label_to_id.keys())
-        log.info(f"Auto-discovered {len(classes)} classes: {classes}")
+    # Log the fully resolved config (after num_classes is set)
+    log.info(f"config:\n{OmegaConf.to_yaml(cfg)}")
+    log.info(f"Training with {cfg.model.num_classes} classes: {list(cfg.classes)}")
     
-    # Set model.num_classes based on classes
-    num_classes = len(classes)
-    if cfg.model.num_classes != num_classes:
-        log.info(f"Setting model.num_classes to {num_classes} (from {len(classes)} classes)")
-        cfg.model.num_classes = num_classes
+    # Build transforms - only Resize and augmentations, NOT Normalize.
+    # All torchvision detection models have a built-in GeneralizedRCNNTransform
+    # that handles normalization (and resize) internally in model.forward().
+    for split_name in ['train', 'val']:
+        transform_cfg = cfg.dataset.transform[split_name]
+        if transform_cfg and any(t.get('name') == 'Normalize' for t in transform_cfg):
+            log.warning("=" * 80)
+            log.warning(f"⚠️  Normalize found in '{split_name}' transforms!")
+            log.warning("    The model's built-in GeneralizedRCNNTransform already normalizes.")
+            log.warning("    This will cause DOUBLE NORMALIZATION and broken results.")
+            log.warning("    Remove Normalize from configs/dataset/jsonl.yaml")
+            log.warning("=" * 80)
     
-    # Create model with correct num_classes
-    if cfg.model.name == "custom_detector":
-        model = SimpleDetector(cfg).to(device)
-        log.info("Simple detector model created and moved to device")
-    elif cfg.model.name == "faster_rcnn":
-        model = FasterRCNNDetector(cfg).to(device)
-        log.info("faster rcnn model created and moved to device")
-    elif cfg.model.name == "effnet":
-        model = EfficientNetDetector(cfg).to(device)
-        log.info("efficientnet model created and moved to device")
-    elif cfg.model.name == "ssdlite":
-        model = SSDLiteDetector(cfg).to(device)
-        log.info("ssdlite model created and moved to device")
-        summary(model, (32, 1, 320, 320))
-    else:
-        raise ValueError(f"Unknown model type: {cfg.model.name}")
-   
-    train_transform = build_transforms(cfg, is_train=True, test=False) #investigate whether each image can be transformed differently
-    val_transform = build_transforms(cfg, is_train=False, test=False)    
-
-    # Create datasets with classes from config
-    train_dataset = ViamDataset(
-        jsonl_path=cfg.dataset.data.train_jsonl,
-        data_dir=cfg.dataset.data.train_data_dir,
-        classes=classes,
-    )
-
-    val_dataset = ViamDataset(
-        jsonl_path=cfg.dataset.data.val_jsonl,
-        data_dir=cfg.dataset.data.val_data_dir,
-        classes=classes,
-    )
+    train_transform = DetectionTransform(cfg.dataset.transform.train) if cfg.dataset.transform.train else None
+    val_transform = DetectionTransform(cfg.dataset.transform.val) if cfg.dataset.transform.val else None
     
     # Create dataloaders
-    # MPS doesn't support multiprocessing, so set num_workers=0
-    # Also disable pin_memory for MPS (only useful for CUDA)
-    num_workers = 0 if device.type == 'mps' else cfg.training.num_workers
+    num_workers = cfg.training.num_workers
     pin_memory = cfg.training.pin_memory and device.type == 'cuda'
     
     train_loader = DataLoader(
@@ -287,7 +377,8 @@ def main(cfg: DictConfig):
         shuffle=True,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        collate_fn=GPUCollate(device, train_transform) 
+        #TODO: replace GPUCollate with CPU transform and rely on multiple workers for keeping GPU fed and CPU busy
+        collate_fn=GPUCollate(device, train_transform)
     )
     
     val_loader = DataLoader(
@@ -299,37 +390,202 @@ def main(cfg: DictConfig):
         collate_fn=GPUCollate(device, val_transform)
     )
     
-    # Create optimizer
-  
-    optimizer = torch.optim.Adam(
-            model.parameters(),
+    # Create model (now with correct num_classes)
+    if cfg.model.name == "faster_rcnn":
+        model = FasterRCNNDetector(cfg).to(device)
+        log.info("faster rcnn model created and moved to device")
+    elif cfg.model.name == "ssdlite":
+        model = SSDLiteDetector(cfg).to(device)
+        log.info("ssdlite model created and moved to device")
+    else:
+        raise ValueError(f"Unknown model: {cfg.model.name}. Supported models: faster_rcnn, ssdlite")
+    
+    # Apply transfer learning configuration (freezing layers if specified)
+    freeze_config = {
+        'freeze_backbone': cfg.training.get('freeze_backbone', False),
+        'freeze_fpn': cfg.model.get('freeze_fpn', False),
+        'freeze_rpn': cfg.model.get('freeze_rpn', False),
+        'freeze_all': cfg.training.get('freeze_all', False),
+    }
+    configure_model_for_transfer_learning(model, cfg.model.name, freeze_config)
+    
+    # Create Model EMA if enabled
+    model_ema = None
+    if cfg.training.get('use_ema', False):
+        ema_decay = cfg.training.get('ema_decay', 0.9998)
+        model_ema = ModelEMA(model, decay=ema_decay, device=device)
+        log.info(f"Created Model EMA with decay={ema_decay}")
+    
+    # Create optimizer with normalization layer separation (PyTorch reference approach)
+    norm_weight_decay = cfg.training.get('norm_weight_decay', None)
+    
+    if norm_weight_decay is None:
+        # Simple case: all parameters get same weight decay
+        parameters = [p for p in model.parameters() if p.requires_grad]
+        log.info("Optimizer: Single parameter group (all trainable params)")
+        log.info(f"  - {sum(p.numel() for p in parameters):,} total trainable params")
+    else:
+        # Split normalization layers from other parameters (PyTorch reference approach)
+        from torchvision.ops._utils import split_normalization_params
+        param_groups = split_normalization_params(model)
+        wd_groups = [norm_weight_decay, cfg.training.weight_decay]
+        parameters = [{"params": p, "weight_decay": w} for p, w in zip(param_groups, wd_groups) if p]
+        
+        log.info("Optimizer: Separate normalization layer weight decay")
+        log.info(f"  - Norm layers: {sum(p.numel() for p in param_groups[0]):,} params, weight_decay={norm_weight_decay}")
+        log.info(f"  - Other layers: {sum(p.numel() for p in param_groups[1]):,} params, weight_decay={cfg.training.weight_decay}")
+    
+    # Use SGD with momentum (PyTorch reference standard)
+    if cfg.training.optimizer == "sgd":
+        optimizer = torch.optim.SGD(
+            parameters,
+            lr=cfg.training.learning_rate,
+            momentum=cfg.training.momentum,
+            weight_decay=cfg.training.weight_decay,
+            nesterov=cfg.training.get('nesterov', False)
+        )
+    elif cfg.training.optimizer == "adam":
+        # Fallback to Adam if specified
+        optimizer = torch.optim.Adam(
+            parameters,
             lr=cfg.training.learning_rate,
             weight_decay=cfg.training.weight_decay
         )
+    else:
+        raise ValueError(f"Unknown optimizer: {cfg.training.optimizer}")
     
-    scheduler = ReduceLROnPlateau(
-        optimizer,
-        mode='min',
-        factor=0.1,
-        patience=3, 
-        min_lr=1e-6
-    )
+    # Learning rate scheduler
+    lr_scheduler_type = cfg.training.get('lr_scheduler', 'multisteplr').lower()
     
-    # train model and get best validation loss
-    best_val_loss = train_model(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        device=device,
-        cfg=cfg
-    )
-    gc.collect() #to avoid CUDA out of memory error on optuna
+    if lr_scheduler_type == 'multisteplr':
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(
+            optimizer,
+            milestones=cfg.training.lr_steps,
+            gamma=cfg.training.lr_gamma
+        )
+        log.info(f"Scheduler: MultiStepLR (milestones={cfg.training.lr_steps}, gamma={cfg.training.lr_gamma})")
+    elif lr_scheduler_type in ['cosineannealinglr', 'cosine']:
+        # CosineAnnealingLR: T_max is number of epochs
+        T_max = cfg.training.num_epochs
+        eta_min = cfg.training.get('lr_eta_min', 0.0)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer,
+            T_max=T_max,
+            eta_min=eta_min
+        )
+        log.info(f"Scheduler: CosineAnnealingLR (T_max={T_max}, eta_min={eta_min})")
+    else:
+        raise ValueError(f"Unknown lr_scheduler: {lr_scheduler_type}. Supported: multisteplr, cosineannealinglr")
+    
+    log.info(f"Warmup: Will be applied in epoch 0 only ({cfg.training.get('warmup_iters', 1000)} iterations)")
+    
+    # Prepare COCO ground truth for validation evaluation
+    log.info("Preparing COCO ground truth for validation...")
+    val_coco_path = Path(cfg.logging.save_dir) / 'val_ground_truth_coco.json'
+    classes = list(cfg.classes) if cfg.get('classes') else None
+    coco_gt = create_coco_gt(val_dataset, val_coco_path, classes)
+    
+    # Training loop
+    writer = SummaryWriter(Path(cfg.logging.save_dir) / 'tensorboard')
+    best_map = 0.0  # Track best mAP (AP@0.50:0.95)
+    best_map50 = 0.0  # Also track AP50 for reference
+    patience_counter = 0
+    
+    log.info("Starting training...")
+    log.info("=" * 80)
+    
+    for epoch in range(cfg.training.num_epochs):
+        # Train one epoch
+        train_metrics = train_one_epoch(
+            model=model,
+            optimizer=optimizer,
+            data_loader=train_loader,
+            epoch=epoch,
+            cfg=cfg,
+            model_ema=model_ema
+        )
+        
+        # Evaluate on validation set
+        # Use EMA model if available (typically performs better)
+        eval_model = model_ema.module if model_ema is not None else model
+        
+        # 1. Compute validation loss (for monitoring)
+        val_loss = evaluate_loss(eval_model, val_loader, device, epoch, cfg)
+        
+        # 2. Compute COCO metrics (for model selection)
+        log.info("Running COCO evaluation on validation set...")
+        coco_metrics = evaluate_coco(eval_model, val_loader, device, coco_gt)
+        
+        # Log all metrics to TensorBoard
+        writer.add_scalar('Loss/train', train_metrics['loss'], epoch)
+        writer.add_scalar('Loss/val', val_loss, epoch)
+        
+        for loss_name, loss_value in train_metrics['loss_dict'].items():
+            writer.add_scalar(f'EpochLoss/{loss_name}', loss_value, epoch)
+        
+        # Log COCO metrics
+        writer.add_scalar('COCO/AP', coco_metrics['AP'], epoch)
+        writer.add_scalar('COCO/AP50', coco_metrics['AP50'], epoch)
+        writer.add_scalar('COCO/AP75', coco_metrics['AP75'], epoch)
+        writer.add_scalar('COCO/AR100', coco_metrics['AR100'], epoch)
+        
+        writer.add_scalar('Learning_rate', optimizer.param_groups[0]['lr'], epoch)
+        
+        log.info(f'Epoch {epoch+1}/{cfg.training.num_epochs}:')
+        log.info(f'  Train Loss: {train_metrics["loss"]:.4f} | Val Loss: {val_loss:.4f}')
+        log.info(f'  AP: {coco_metrics["AP"]:.4f} | AP50: {coco_metrics["AP50"]:.4f} | AP75: {coco_metrics["AP75"]:.4f}')
+        log.info(f'  LR: {optimizer.param_groups[0]["lr"]:.6f}')
+        
+        # PyTorch reference: Step scheduler per-epoch (after validation)
+        scheduler.step()
+        
+        # Save checkpoint if best mAP (following torchvision's approach of using AP for model selection)
+        current_map = coco_metrics['AP']  # AP @ IoU=0.50:0.95
+        
+        if current_map > best_map:
+            best_map = current_map
+            best_map50 = coco_metrics['AP50']
+            checkpoint_path = Path(cfg.logging.save_dir) / 'best_model.pth'
+            
+            checkpoint_dict = {
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'val_loss': val_loss,
+                'coco_metrics': coco_metrics,
+                'best_map': best_map,
+                'best_map50': best_map50,
+            }
+            
+            if model_ema is not None:
+                checkpoint_dict['model_ema_state_dict'] = model_ema.state_dict()
+            
+            torch.save(checkpoint_dict, checkpoint_path)
+            log.info(f'✓ New best model! AP: {best_map:.4f} (AP50: {best_map50:.4f}) - Saved to {checkpoint_path}')
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            log.info(f'  No improvement (best AP: {best_map:.4f}), patience: {patience_counter}/{cfg.training.early_stopping_patience}')
+        
+        log.info("=" * 80)
+        
+        # Early stopping
+        if patience_counter >= cfg.training.early_stopping_patience:
+            log.info(f'Early stopping triggered after {epoch + 1} epochs')
+            break
+    
+    writer.close()
+    log.info("Training complete!")
+    log.info(f"Best mAP: {best_map:.4f} (AP50: {best_map50:.4f})")
+    log.info(f"Results and model available in run directory: {cfg.logging.save_dir}")
+    
+    # Cleanup for Optuna
+    gc.collect()
     torch.cuda.empty_cache()
-    # best validation loss for Optuna 
-    return best_val_loss
+    
+    return best_map  # Return mAP instead of loss for hyperparameter optimization
+
 
 if __name__ == "__main__":
-    main() 
-
+    main()

@@ -15,11 +15,3 @@
 #   cls_loss_weight: <float>
 #   rpn_loss_weight: <float>
 # best_value: <float>
-
-name: optuna
-best_params:
-  learning_rate: 0.001
-  weight_decay: 1e-5
-  cls_loss_weight: 0.5
-  rpn_loss_weight: 0.5
-best_value: null
