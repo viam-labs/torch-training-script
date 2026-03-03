@@ -12,6 +12,21 @@ data:
   train_dir: null   # Required: directory containing dataset.jsonl + data/
   val_dir: null     # Optional: if null, auto-split from train_dir (see training.val_split)
 
+# Normalization statistics for the model's internal GeneralizedRCNNTransform.
+# These override model.transform.image_mean/std before model creation, so the
+# resolved values are saved in the Hydra output config and picked up by ONNX export.
+#
+# Priority (highest wins):
+#   1. Explicit image_mean/image_std below (manual override)
+#   2. compute_from_dataset: true  (auto-compute from training images)
+#   3. Model config defaults (ImageNet stats)
+#
+# Ignored when training.pretrained=true (pretrained models use built-in stats).
+normalization:
+  compute_from_dataset: false   # Compute per-channel mean/std from training images
+  image_mean: null              # Manual override, e.g. [0.52, 0.48, 0.45]
+  image_std: null               # Manual override, e.g. [0.21, 0.20, 0.19]
+
 # Transform configuration
 # Note: Transforms are applied via GPUCollate in the dataloader BEFORE model.forward()
 #

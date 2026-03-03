@@ -218,6 +218,67 @@ class GPUCollate:
         return images, targets
 
 
+def compute_dataset_stats(
+    dataset,
+    max_samples: Optional[int] = None,
+) -> Tuple[List[float], List[float]]:
+    """Compute per-channel mean and std over a dataset of [C, H, W] float [0,1] images.
+
+    Uses a two-pass approach (first mean, then std) which is simple and
+    numerically stable enough for typical dataset sizes.
+
+    Args:
+        dataset: A ``ViamDataset`` or ``torch.utils.data.Subset`` whose
+            ``__getitem__`` returns ``(image_tensor, target)``.
+        max_samples: If set, cap the number of images sampled (randomly).
+
+    Returns:
+        ``(mean, std)`` — each a list of 3 floats [R, G, B] in [0, 1] range.
+    """
+    from torch.utils.data import Subset
+
+    indices: List[int]
+    if isinstance(dataset, Subset):
+        indices = list(dataset.indices)
+        base_dataset = dataset.dataset
+    else:
+        indices = list(range(len(dataset)))
+        base_dataset = dataset
+
+    if max_samples is not None and max_samples < len(indices):
+        import random as _rng
+        indices = _rng.sample(indices, max_samples)
+
+    n = len(indices)
+    log.info(f"Computing dataset normalization stats over {n} images ...")
+
+    # Pass 1: mean
+    channel_sum = torch.zeros(3, dtype=torch.float64)
+    pixel_count = 0
+    for idx in indices:
+        img, _ = base_dataset[idx]  # [C, H, W] float [0,1]
+        channel_sum += img.to(torch.float64).sum(dim=[1, 2])
+        pixel_count += img.shape[1] * img.shape[2]
+
+    mean = (channel_sum / pixel_count).tolist()
+
+    # Pass 2: std
+    channel_sq_sum = torch.zeros(3, dtype=torch.float64)
+    mean_t = torch.tensor(mean, dtype=torch.float64).view(3, 1, 1)
+    for idx in indices:
+        img, _ = base_dataset[idx]
+        channel_sq_sum += ((img.to(torch.float64) - mean_t) ** 2).sum(dim=[1, 2])
+
+    std = (channel_sq_sum / pixel_count).sqrt().tolist()
+
+    # Round for cleaner config output
+    mean = [round(v, 6) for v in mean]
+    std = [round(v, 6) for v in std]
+
+    log.info(f"Dataset stats — mean: {mean}, std: {std}")
+    return mean, std
+
+
 def build_transforms(cfg: DictConfig, is_train: bool = True, test: bool = False) -> Optional[DetectionTransform]:
     """
     Build transforms from config.

@@ -22,7 +22,7 @@ from utils.coco_eval import evaluate_coco
 from utils.freeze import configure_model_for_transfer_learning
 from utils.model_ema import ModelEMA
 from utils.seed import set_seed
-from utils.transforms import DetectionTransform, GPUCollate
+from utils.transforms import DetectionTransform, GPUCollate, compute_dataset_stats
 
 log = logging.getLogger(__name__)
 
@@ -318,6 +318,55 @@ def create_coco_gt(val_dataset, output_path, classes):
     return coco_gt
 
 
+def resolve_normalization(cfg: DictConfig, train_dataset) -> None:
+    """Resolve dataset normalization into ``cfg.model.transform.image_mean/std``.
+
+    Priority (highest wins):
+      1. Explicit values in ``dataset.normalization.image_mean / image_std``
+      2. ``dataset.normalization.compute_from_dataset = true``
+      3. Existing ``model.transform`` defaults (ImageNet stats)
+
+    When ``training.pretrained=true`` the model's built-in transform is used and
+    any dataset normalization settings are ignored (with a warning).
+
+    Mutates *cfg* in-place (``set_struct`` must be False on entry).
+    """
+    norm_cfg = cfg.dataset.get('normalization', {})
+    explicit_mean = norm_cfg.get('image_mean')
+    explicit_std = norm_cfg.get('image_std')
+    compute = norm_cfg.get('compute_from_dataset', False)
+
+    if cfg.training.get('pretrained', False):
+        if compute or explicit_mean or explicit_std:
+            log.warning(
+                "pretrained=true: dataset normalization settings are ignored; "
+                "the pretrained model uses its built-in ImageNet stats."
+            )
+        return
+
+    if explicit_mean is not None and explicit_std is not None:
+        cfg.model.transform.image_mean = list(explicit_mean)
+        cfg.model.transform.image_std = list(explicit_std)
+        log.info(f"Using manual normalization — mean: {list(explicit_mean)}, std: {list(explicit_std)}")
+    elif compute:
+        mean, std = compute_dataset_stats(train_dataset)
+        cfg.model.transform.image_mean = mean
+        cfg.model.transform.image_std = std
+        log.info(f"Computed dataset normalization — mean: {mean}, std: {std}")
+        log.info(
+            "To reuse these stats without recomputing, add to your next CLI command:\n"
+            f"  dataset.normalization.compute_from_dataset=false \\\n"
+            f"  'dataset.normalization.image_mean={mean}' \\\n"
+            f"  'dataset.normalization.image_std={std}'"
+        )
+    else:
+        log.info(
+            f"Using default normalization — "
+            f"mean: {list(cfg.model.transform.image_mean)}, "
+            f"std: {list(cfg.model.transform.image_std)}"
+        )
+
+
 @hydra.main(config_path="../configs", config_name="train", version_base=None)
 def main(cfg: DictConfig):
     """Main training function."""
@@ -347,7 +396,13 @@ def main(cfg: DictConfig):
     # Resolve paths, discover classes, create datasets
     train_dataset, val_dataset = prepare_data(cfg)
     
-    # Log the fully resolved config (after num_classes is set)
+    # Resolve normalization: compute from dataset, use manual overrides, or keep defaults.
+    # Must run before model creation so cfg.model.transform.image_mean/std are correct.
+    OmegaConf.set_struct(cfg, False)
+    resolve_normalization(cfg, train_dataset)
+    OmegaConf.set_struct(cfg, True)
+    
+    # Log the fully resolved config (after num_classes and normalization are set)
     log.info(f"config:\n{OmegaConf.to_yaml(cfg)}")
     log.info(f"Training with {cfg.model.num_classes} classes: {list(cfg.classes)}")
     
