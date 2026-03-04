@@ -411,6 +411,13 @@ def main(cfg: DictConfig):
     resolve_normalization(cfg, train_dataset)
     OmegaConf.set_struct(cfg, True)
     
+    # Overwrite Hydra's config snapshot so it reflects the actual values used
+    # (Hydra writes .hydra/config.yaml at startup, before runtime mutations
+    # like computed normalization stats).
+    hydra_config_path = Path(cfg.logging.save_dir) / '.hydra' / 'config.yaml'
+    if hydra_config_path.exists():
+        OmegaConf.save(cfg, hydra_config_path)
+    
     # Log the fully resolved config (after num_classes and normalization are set)
     log.info(f"config:\n{OmegaConf.to_yaml(cfg)}")
     log.info(f"Training with {cfg.model.num_classes} classes: {list(cfg.classes)}")

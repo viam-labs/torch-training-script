@@ -139,43 +139,46 @@ class ONNXModelWrapper:
         return results
 
 
-def visualize_predictions(image,predictions,targets,cfg: DictConfig, title="", output_dir=None):
-    # Convert from [C, H, W] to [H, W, C] for RGB display
-    # Clamp values to [0, 1] range for proper display
-    img_np = image.cpu().numpy().transpose(1, 2, 0)  # RGB image [H, W, C]
-    img_np = np.clip(img_np, 0, 1)  # Ensure values are in [0, 1] range
+def visualize_predictions(image, predictions, targets, cfg: DictConfig,
+                          id_to_label=None, title="", output_dir=None):
+    img_np = image.cpu().numpy().transpose(1, 2, 0)
+    img_np = np.clip(img_np, 0, 1)
     fig, ax = plt.subplots(1)
     ax.imshow(img_np)
-    
-    # Plot predicted boxes in red
+
+    def _label_name(label_id):
+        if id_to_label is None:
+            return str(int(label_id))
+        return id_to_label.get(int(label_id), str(int(label_id)))
+
     if predictions is not None and len(predictions['boxes']) > 0:
-        for box, score in zip(predictions['boxes'], predictions['scores']):
+        for box, score, label in zip(predictions['boxes'], predictions['scores'], predictions['labels']):
             x1, y1, x2, y2 = box.cpu().numpy()
-            if score > cfg.evaluation.confidence_threshold:  # Only plot boxes with confidence > threshold
-                rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, 
-                                    edgecolor='r', facecolor='none')
+            if score > cfg.evaluation.confidence_threshold:
+                rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1,
+                                         edgecolor='r', facecolor='none')
                 ax.add_patch(rect)
-                ax.text(x1, y1-5, f'{score:.2f}', color='red')
-    
-    # Plot ground truth boxes in green
+                ax.text(x1, y1-5, f'{_label_name(label)} {score:.2f}', color='red', fontsize=7)
+
     if targets is not None and targets['boxes'].numel() > 0:
         boxes = targets['boxes'].view(-1, 4)
-        for box in boxes:
+        labels = targets['labels'].view(-1)
+        for box, label in zip(boxes, labels):
             x1, y1, x2, y2 = box.cpu().numpy()
-            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=2, 
-                                  edgecolor='g', facecolor='none')
+            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1,
+                                     edgecolor='lime', facecolor='none', linestyle='--')
             ax.add_patch(rect)
-    
+            ax.text(x1, y2+12, _label_name(label), color='lime', fontsize=7)
+
     plt.title(title)
     plt.axis('off')
-    
-    # Save figure 
+
     if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         save_path = output_dir / f"{title.replace(' ', '_')}.png"
-        plt.savefig(save_path)
-    plt.close()  
+        plt.savefig(save_path, dpi=200, bbox_inches='tight')
+    plt.close()
 
 def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     """
@@ -189,6 +192,9 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     
     visualize = cfg.evaluation.get("visualize", False)
     vis_dir = Path(cfg.logging.save_dir) / "visualizations" if visualize else None
+
+    classes = cfg.get('classes', None)
+    id_to_label = {idx + 1: label for idx, label in enumerate(sorted(classes))} if classes else None
     
     # Track confidence score statistics for reporting
     all_scores = []
@@ -208,6 +214,7 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
                         outputs[i],
                         targets[i],
                         cfg=cfg,
+                        id_to_label=id_to_label,
                         output_dir=vis_dir,
                         title=f"Image {targets[i]['image_id']}",
                     )
@@ -399,7 +406,7 @@ def main(cfg: DictConfig):
     test_dataset = ViamDataset(
         jsonl_path=cfg.dataset.data.test_jsonl,
         data_dir=cfg.dataset.data.test_data_dir,
-        classes=classes,
+        classes=['human_annotated_wake_blob', "human_annotated_positive_fish_blob"],
     )
  
     # Checkpoint path - auto-detect from run_dir if not provided
