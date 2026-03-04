@@ -23,8 +23,8 @@ hydra:
       
       # Hyperparameters to optimize (PyTorch reference style)
       training.learning_rate: tag(log, interval(1e-4, 1e-2))   # Search around 0.0025 (PyTorch default for 1 GPU)
-      training.weight_decay: tag(log, interval(1e-6, 1e-3))    # Around 1e-4 base
-      training.momentum: tag(uniform, interval(0.85, 0.95))    # Around 0.9 base
+      # training.weight_decay: tag(log, interval(1e-6, 1e-3))    # Around 1e-4 base
+      # training.momentum: tag(uniform, interval(0.85, 0.95))    # Around 0.9 base
 
 defaults:
   - model: faster_rcnn  # Choose: faster_rcnn, ssdlite, effnet
@@ -59,8 +59,10 @@ training:
   nesterov: false
   
   # Learning rate schedule (PyTorch reference)
+  lr_scheduler: multisteplr  # Options: multisteplr, cosineannealinglr, cosine
   lr_steps: [8, 11]  # Reduce LR at these epochs (adjusted for shorter training)
   lr_gamma: 0.1  # Multiply LR by this factor
+  lr_eta_min: 0.0  # Minimum learning rate (for CosineAnnealingLR)
   
   # Warmup settings (applied only in epoch 0)
   warmup_iters: 1000  # Number of iterations for warmup in first epoch
@@ -71,6 +73,7 @@ training:
   
   # Training settings
   gradient_clip: 0.0  # Max gradient norm (0 to disable, PyTorch reference doesn't use it)
+  gradient_accumulation_steps: 1  # Effective batch = batch_size * this value
   early_stopping_patience: 10  # Shorter patience for sweeps
   num_workers: 1
   pin_memory: false
@@ -79,7 +82,10 @@ training:
   use_ema: true  # Enable EMA for more stable models (+0.5-1.0 mAP)
   ema_decay: 0.9998  # EMA decay rate (0.9998 or 0.9999)
   
-  # Transfer Learning: Layer Freezing
+  # Transfer Learning
+  pretrained: false  # Use pretrained weights (COCO) for transfer learning
+  
+  # Layer Freezing Strategy (only applies when pretrained=true)
   freeze_backbone: false  # ALL MODELS
   freeze_all: false       # ALL MODELS
 
