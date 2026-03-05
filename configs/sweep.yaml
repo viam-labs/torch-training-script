@@ -70,6 +70,7 @@ training:
   
   # Validation split (used when dataset.data.val_dir is not set)
   val_split: 0.2  # Fraction of training data used for validation when val_dir is null
+  val_split_strategy: sequence  # sequence: split by sequence_id (prevents leakage), random: classic random split
   
   # Training settings
   gradient_clip: 0.0  # Max gradient norm (0 to disable, PyTorch reference doesn't use it)

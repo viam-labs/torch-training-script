@@ -12,7 +12,7 @@ import torch
 import torch.multiprocessing as mp
 from omegaconf import DictConfig, OmegaConf
 from pycocotools.coco import COCO
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, Subset, random_split
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -341,7 +341,7 @@ def prepare_data(cfg: DictConfig):
         )
     else:
         val_split = cfg.training.get('val_split', 0.2)
-        log.info(f"No val_dir provided. Sequence-aware split with val_split={val_split}")
+        strategy = cfg.training.get('val_split_strategy', 'sequence')
 
         full_dataset = ViamDataset(
             jsonl_path=str(train_jsonl),
@@ -349,11 +349,33 @@ def prepare_data(cfg: DictConfig):
             classes=classes,
         )
 
-        train_indices, val_indices = sequence_aware_split(
-            full_dataset, val_split, cfg.experiment.seed
-        )
-        train_dataset = Subset(full_dataset, train_indices)
-        val_dataset = Subset(full_dataset, val_indices)
+        if strategy == 'sequence':
+            log.info(f"No val_dir provided. Sequence-aware split with val_split={val_split}")
+            train_indices, val_indices = sequence_aware_split(
+                full_dataset, val_split, cfg.experiment.seed
+            )
+            train_dataset = Subset(full_dataset, train_indices)
+            val_dataset = Subset(full_dataset, val_indices)
+        elif strategy == 'random':
+            log.info(f"No val_dir provided. Random split with val_split={val_split}")
+            total_size = len(full_dataset)
+            val_size = int(total_size * val_split)
+            train_size = total_size - val_size
+            if val_size == 0:
+                raise ValueError(
+                    f"val_split={val_split} results in 0 validation samples "
+                    f"(total={total_size}). Increase val_split or provide a val_dir."
+                )
+            split_generator = torch.Generator().manual_seed(cfg.experiment.seed)
+            train_dataset, val_dataset = random_split(
+                full_dataset, [train_size, val_size], generator=split_generator
+            )
+            log.info(f"Random split: {train_size} train / {val_size} val (from {total_size} total)")
+        else:
+            raise ValueError(
+                f"Unknown val_split_strategy: '{strategy}'. "
+                f"Supported: 'sequence', 'random'."
+            )
 
     return train_dataset, val_dataset
 
@@ -609,7 +631,6 @@ def main(cfg: DictConfig):
         )
         log.info(f"Scheduler: MultiStepLR (milestones={cfg.training.lr_steps}, gamma={cfg.training.lr_gamma})")
     elif lr_scheduler_type in ['cosineannealinglr', 'cosine']:
-        # CosineAnnealingLR: T_max is number of epochs
         T_max = cfg.training.num_epochs
         eta_min = cfg.training.get('lr_eta_min', 0.0)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
@@ -618,8 +639,21 @@ def main(cfg: DictConfig):
             eta_min=eta_min
         )
         log.info(f"Scheduler: CosineAnnealingLR (T_max={T_max}, eta_min={eta_min})")
+    elif lr_scheduler_type in ['reducelronplateau', 'plateau']:
+        lr_patience = cfg.training.get('lr_patience', 5)
+        lr_factor = cfg.training.get('lr_factor', 0.1)
+        lr_min = cfg.training.get('lr_min', 0.0)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            mode='min',
+            factor=lr_factor,
+            patience=lr_patience,
+            min_lr=lr_min,
+            verbose=False,
+        )
+        log.info(f"Scheduler: ReduceLROnPlateau (patience={lr_patience}, factor={lr_factor}, min_lr={lr_min})")
     else:
-        raise ValueError(f"Unknown lr_scheduler: {lr_scheduler_type}. Supported: multisteplr, cosineannealinglr")
+        raise ValueError(f"Unknown lr_scheduler: {lr_scheduler_type}. Supported: multisteplr, cosineannealinglr, reducelronplateau")
     
     log.info(f"Warmup: Will be applied in epoch 0 only ({cfg.training.get('warmup_iters', 1000)} iterations)")
     
@@ -680,7 +714,10 @@ def main(cfg: DictConfig):
         log.info(f'  LR: {optimizer.param_groups[0]["lr"]:.6f}')
         
         # PyTorch reference: Step scheduler per-epoch (after validation)
-        scheduler.step()
+        if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+            scheduler.step(val_loss)
+        else:
+            scheduler.step()
         
         # Save checkpoint if best validation loss
         if val_loss < best_val_loss:

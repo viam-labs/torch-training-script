@@ -145,6 +145,20 @@ data:
 
 When `val_dir` is not set, the training data is automatically split into train/val using `training.val_split` (default: 0.2).
 
+**Validation split strategy** (`training.val_split_strategy`):
+
+| Strategy | Description |
+|----------|-------------|
+| `sequence` (default) | Splits by sequence ID so all images from the same sequence stay in the same split. Prevents data leakage from visually similar frames. Images without a sequence annotation are placed in the train set. |
+| `random` | Classic random per-image split. Use when your dataset has no sequence annotations. |
+
+Sequence IDs are extracted from `classification_annotations` in the JSONL — any label starting with `sequence_` (e.g., `sequence_692deaf544fd84377862f2a1`). The suffix after `--` is stripped so images sharing the same sequence prefix are grouped together.
+
+```bash
+# Override on the command line
+python src/train.py --config-name=train training.val_split_strategy=random
+```
+
 **Note:** Test datasets are specified directly via the `dataset_dir` CLI argument to `eval.py`, not in this config file.
 
 ### Model Selection
@@ -253,6 +267,12 @@ The training pipeline follows **PyTorch's reference detection training** best pr
 - Enabled by default (`training.use_ema: true`)
 - Decay rate: 0.9998
 - EMA weights are used for evaluation and saved in checkpoints
+
+**Validation Split:**
+- Split ratio: 0.2 (`training.val_split`)
+- Strategy: `sequence` by default (`training.val_split_strategy`)
+- Sequence-aware splitting groups images by their sequence ID so similar frames don't leak across train/val
+- Falls back to `random` if your dataset has no sequence annotations
 
 ### Output Directories
 

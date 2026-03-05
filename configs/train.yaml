@@ -47,10 +47,13 @@ training:
   nesterov: false
   
   # Learning rate schedule
-  lr_scheduler: multisteplr  # Options: multisteplr, cosineannealinglr, cosine
+  lr_scheduler: reducelronplateau  # Options: multisteplr, cosineannealinglr, reducelronplateau
   lr_steps: [16, 22]  # Reduce LR at these epochs (for MultiStepLR)
   lr_gamma: 0.1  # Multiply LR by this factor (for MultiStepLR)
   lr_eta_min: 0.0  # Minimum learning rate (for CosineAnnealingLR)
+  lr_patience: 5  # Epochs with no improvement before reducing LR (for ReduceLROnPlateau)
+  lr_factor: 0.1  # Multiply LR by this factor on plateau (for ReduceLROnPlateau)
+  lr_min: 0.0  # Minimum learning rate (for ReduceLROnPlateau)
   
   # Warmup settings (applied only in epoch 0)
   warmup_iters: 1000  # Number of iterations for warmup in first epoch
@@ -58,6 +61,7 @@ training:
   
   # Validation split (used when dataset.data.val_dir is not set)
   val_split: 0.2  # Fraction of training data used for validation when val_dir is null
+  val_split_strategy: sequence  # sequence: split by sequence_id (prevents leakage), random: classic random split
   
   # Training settings
   gradient_clip: 0.0  # Max gradient norm (0 to disable, PyTorch reference doesn't use it)
@@ -100,7 +104,7 @@ training:
 
 hydra:
   run:
-    dir: outputs/${now:%Y-%m-%d}/lr${training.learning_rate}_bs${training.batch_size}x${training.gradient_accumulation_steps}_steps${join_dash:${training.lr_steps}}_${basename:${dataset.data.train_dir}}_${now:%H-%M-%S}
+    dir: outputs/${now:%Y-%m-%d}/lr${training.learning_rate}_bs${training.batch_size}x${training.gradient_accumulation_steps}_${training.lr_scheduler}_${basename:${dataset.data.train_dir}}_${now:%H-%M-%S}
 
 # Logging
 logging:
