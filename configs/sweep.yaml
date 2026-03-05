@@ -6,7 +6,7 @@
 # Hydra Optuna Sweeper Configuration
 hydra:
   sweep:
-    dir: outputs/${now:%Y-%m-%d}/lr${training.learning_rate}_bs${training.batch_size}x${training.gradient_accumulation_steps}_steps${join_dash:${training.lr_steps}}_${basename:${dataset.data.train_dir}}
+    dir: outputs/${now:%Y-%m-%d}/lr${training.learning_rate}_bs${training.batch_size}x${training.gradient_accumulation_steps}_steps${join_dash:${training.lr_steps}}_${basename:${dataset.data.train_dir}}_${now:%H-%M-%S}
   sweeper:
     _target_: hydra_plugins.hydra_optuna_sweeper.optuna_sweeper.OptunaSweeper
     sampler:

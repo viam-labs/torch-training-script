@@ -2,7 +2,9 @@
 import gc
 import logging
 import math
+import random
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import hydra
@@ -10,7 +12,7 @@ import torch
 import torch.multiprocessing as mp
 from omegaconf import DictConfig, OmegaConf
 from pycocotools.coco import COCO
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader, Subset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -174,6 +176,86 @@ def evaluate_loss(model, data_loader, device, epoch, cfg):
 # COCO evaluation functions moved to utils/coco_eval.py for reuse
 
 
+def sequence_aware_split(dataset, val_split: float, seed: int):
+    """Split a ViamDataset into train/val indices keeping sequences intact.
+
+    Images sharing the same sequence_id always land in the same split.
+    Images without a sequence_id are placed in the train set.
+
+    Returns:
+        (train_indices, val_indices) — disjoint lists covering all dataset indices.
+    """
+    seq_to_indices = defaultdict(list)
+    no_seq_indices = []
+
+    for idx, sample in enumerate(dataset.samples):
+        seq_id = sample.get('sequence_id')
+        if seq_id is None:
+            no_seq_indices.append(idx)
+        else:
+            seq_to_indices[seq_id].append(idx)
+
+    total_images = len(dataset)
+    total_sequenced = sum(len(v) for v in seq_to_indices.values())
+    num_sequences = len(seq_to_indices)
+
+    log.info(f"Sequence-aware split: {total_images} total images, "
+             f"{num_sequences} unique sequences ({total_sequenced} images), "
+             f"{len(no_seq_indices)} images without sequence (assigned to train)")
+
+    if num_sequences == 0:
+        raise ValueError(
+            "No images have a sequence_id — cannot perform sequence-aware "
+            "validation split. Either add sequence annotations or provide a "
+            "separate val_dir."
+        )
+
+    # Shuffle sequences deterministically and walk until we fill val
+    seq_ids = sorted(seq_to_indices.keys())
+    rng = random.Random(seed)
+    rng.shuffle(seq_ids)
+
+    target_val = int(total_images * val_split)
+
+    val_indices = []
+    val_seq_count = 0
+    split_point = len(seq_ids)
+
+    for i, seq_id in enumerate(seq_ids):
+        if len(val_indices) >= target_val:
+            split_point = i
+            break
+        val_indices.extend(seq_to_indices[seq_id])
+        val_seq_count += 1
+
+    # Remaining sequences go to train
+    train_indices = list(no_seq_indices)
+    for seq_id in seq_ids[split_point:]:
+        train_indices.extend(seq_to_indices[seq_id])
+
+    train_seq_count = num_sequences - val_seq_count
+
+    log.info(f"Sequence split: {train_seq_count} sequences -> train, "
+             f"{val_seq_count} sequences -> val")
+    log.info(f"Final split: {len(train_indices)} train / {len(val_indices)} val images "
+             f"(requested val_split={val_split})")
+
+    if len(val_indices) == 0:
+        raise ValueError(
+            f"val_split={val_split} produced 0 validation images. "
+            f"Increase val_split or provide a separate val_dir."
+        )
+
+    if len(val_indices) < 0.5 * target_val:
+        log.warning(
+            f"Validation set ({len(val_indices)} images) is much smaller than "
+            f"the target ({target_val}). Sequences are coarse-grained; consider "
+            f"adjusting val_split or using a separate val_dir."
+        )
+
+    return train_indices, val_indices
+
+
 def prepare_data(cfg: DictConfig):
     """Resolve data paths, discover classes, and create train/val datasets.
 
@@ -259,7 +341,7 @@ def prepare_data(cfg: DictConfig):
         )
     else:
         val_split = cfg.training.get('val_split', 0.2)
-        log.info(f"No val_dir provided. Auto-splitting training data with val_split={val_split}")
+        log.info(f"No val_dir provided. Sequence-aware split with val_split={val_split}")
 
         full_dataset = ViamDataset(
             jsonl_path=str(train_jsonl),
@@ -267,22 +349,11 @@ def prepare_data(cfg: DictConfig):
             classes=classes,
         )
 
-        total_size = len(full_dataset)
-        val_size = int(total_size * val_split)
-        train_size = total_size - val_size
-
-        if val_size == 0:
-            raise ValueError(
-                f"val_split={val_split} results in 0 validation samples "
-                f"(total={total_size}). Increase val_split or provide a val_dir."
-            )
-
-        split_generator = torch.Generator().manual_seed(cfg.experiment.seed)
-        train_dataset, val_dataset = random_split(
-            full_dataset, [train_size, val_size], generator=split_generator
+        train_indices, val_indices = sequence_aware_split(
+            full_dataset, val_split, cfg.experiment.seed
         )
-
-        log.info(f"Auto-split: {train_size} train / {val_size} val samples (from {total_size} total)")
+        train_dataset = Subset(full_dataset, train_indices)
+        val_dataset = Subset(full_dataset, val_indices)
 
     return train_dataset, val_dataset
 

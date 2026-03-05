@@ -95,9 +95,18 @@ class ViamDataset(Dataset):
                     if bbox.get('annotation_label') in self.label_to_id
                 ]
                 
+                # Extract sequence ID from classification_annotations
+                sequence_id = None
+                for ann in data.get('classification_annotations', []):
+                    label = ann.get('annotation_label', '')
+                    if label.startswith('sequence_'):
+                        sequence_id = label.split('--')[0]
+                        break
+                
                 self.samples.append({
                     'image_path': image_path,
-                    'boxes': filtered_boxes
+                    'boxes': filtered_boxes,
+                    'sequence_id': sequence_id,
                 })
         
         n_with_boxes = sum(1 for s in self.samples if s['boxes'])
