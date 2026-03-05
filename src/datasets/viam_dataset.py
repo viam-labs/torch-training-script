@@ -95,14 +95,14 @@ class ViamDataset(Dataset):
                     if bbox.get('annotation_label') in self.label_to_id
                 ]
                 
-                # Only include images with at least one annotation from specified classes
-                if filtered_boxes:
-                    self.samples.append({
-                        'image_path': image_path,
-                        'boxes': filtered_boxes
-                    })
+                self.samples.append({
+                    'image_path': image_path,
+                    'boxes': filtered_boxes
+                })
         
-        log.info(f"Loaded {len(self.samples)} images with annotations from specified classes")
+        n_with_boxes = sum(1 for s in self.samples if s['boxes'])
+        log.info(f"Loaded {len(self.samples)} images ({n_with_boxes} with annotations, "
+                 f"{len(self.samples) - n_with_boxes} negative/background)")
     
     def get_classes(self) -> List[str]:
         """Return sorted list of class names."""
@@ -168,12 +168,12 @@ class ViamDataset(Dataset):
             boxes.append([x_min, y_min, x_max, y_max])
             labels.append(self.label_to_id[label])
         
-        # Ensure we have at least one box
         if len(boxes) == 0:
-            raise ValueError(f"No valid boxes found for image {image_path}")
-        
-        boxes = torch.tensor(boxes, dtype=torch.float32)
-        labels = torch.tensor(labels, dtype=torch.int64)
+            boxes = torch.zeros((0, 4), dtype=torch.float32)
+            labels = torch.zeros((0,), dtype=torch.int64)
+        else:
+            boxes = torch.tensor(boxes, dtype=torch.float32)
+            labels = torch.tensor(labels, dtype=torch.int64)
         
         # Convert PIL image to tensor
         image = F.to_tensor(image)

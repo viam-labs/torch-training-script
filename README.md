@@ -265,7 +265,7 @@ Used for regular training (`--config-name=train`):
 ```
 outputs/
 └── YYYY-MM-DD/
-    └── HH-MM-SS/                    # Timestamp of run
+    └── lr0.0025_bs16x1_steps16-22_triangles_dataset/  # Named after key config params
         ├── .hydra/
         │   ├── config.yaml          # Full config used for this run
         │   ├── hydra.yaml           # Hydra settings
@@ -276,6 +276,8 @@ outputs/
         │   └── events.out.tfevents.*
         └── train.log                # Training logs (loss, metrics, etc.)
 ```
+
+The run directory name encodes: learning rate, batch size x gradient accumulation steps, LR schedule steps, and training dataset name.
 
 What you'll find:
 - `best_model.pth`: Your trained model checkpoint (saved when validation mAP improves)
@@ -288,9 +290,9 @@ What you'll find:
 Used for hyperparameter optimization (`--config-name=sweep --multirun`):
 
 ```
-multirun/
+outputs/
 └── YYYY-MM-DD/
-    └── HH-MM-SS/                    # Timestamp of sweep start
+    └── lr0.0025_bs16x1_steps8-11_triangles_dataset/  # Named after key config params
         ├── 0/                       # Trial 0 (first hyperparameter combination)
         │   ├── .hydra/
         │   │   ├── config.yaml      # Config for this trial

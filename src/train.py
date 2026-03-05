@@ -27,6 +27,8 @@ from utils.transforms import DetectionTransform, GPUCollate, compute_dataset_sta
 log = logging.getLogger(__name__)
 
 OmegaConf.register_new_resolver("eval", eval)
+OmegaConf.register_new_resolver("join_dash", lambda lst: "-".join(str(x) for x in lst))
+OmegaConf.register_new_resolver("basename", lambda p: Path(p).name if p else "unknown")
 
 
 def train_one_epoch(model, optimizer, data_loader, epoch, cfg, model_ema=None):

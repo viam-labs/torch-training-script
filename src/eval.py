@@ -406,7 +406,7 @@ def main(cfg: DictConfig):
     test_dataset = ViamDataset(
         jsonl_path=cfg.dataset.data.test_jsonl,
         data_dir=cfg.dataset.data.test_data_dir,
-        classes=['human_annotated_wake_blob', "human_annotated_positive_fish_blob"],
+        classes=classes,
     )
  
     # Checkpoint path - auto-detect from run_dir if not provided
