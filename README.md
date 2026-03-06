@@ -17,6 +17,7 @@ A PyTorch-based object detection training pipeline supporting Faster R-CNN and S
   - [Training Hyperparameters](#training-hyperparameters)
   - [Output Directories](#output-directories)
 - [Evaluation](#evaluation)
+- [Visualization (standalone)](#visualization-standalone)
 - [ONNX Conversion](#onnx-conversion)
 - [Viam Vision Service](#viam-vision-service)
 - [Viam Integration Workflow](#viam-integration-workflow)
@@ -437,6 +438,44 @@ The evaluation script reports:
 3. Evaluates using pycocotools
 4. Saves results and visualizations
 
+## Visualization (standalone)
+
+The visualization script (`src/visualize.py`) draws predictions and ground truth boxes from the JSON files produced by `eval.py`. It requires no GPU, model, or Hydra -- only matplotlib, the images, and the eval output JSONs.
+
+This is useful when you run evaluation on a remote GPU machine and want to inspect results locally without transferring the full image dataset again.
+
+**Workflow:**
+1. Run `eval.py` on the GPU machine (produces `*_predictions.json` + `ground_truth_coco.json`)
+2. SCP the eval output folder to your local machine
+3. Run `visualize.py` pointing at your local copy of the dataset images
+
+**Usage:**
+
+```bash
+# Basic usage (auto-detects JSON files in eval_dir)
+python src/visualize.py <dataset_dir> <eval_dir>
+
+# With options
+python src/visualize.py datasets/my_dataset outputs/18-08-48/eval_my_dataset_best_model_pth \
+    --confidence-threshold 0.5 \
+    --max-images 20 \
+    --output-dir ./my_visualizations
+```
+
+**Arguments:**
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `dataset_dir` | yes | Dataset directory (must contain `data/` with images) |
+| `eval_dir` | yes | Eval output directory (containing predictions + ground truth JSONs) |
+| `--confidence-threshold` | no | Only draw predictions above this score (default: 0.7) |
+| `--predictions-file` | no | Path to predictions JSON (default: auto-detect `*_predictions.json` in eval_dir) |
+| `--gt-file` | no | Path to ground truth COCO JSON (default: auto-detect in eval_dir) |
+| `--output-dir` | no | Where to save visualizations (default: `eval_dir/visualizations/`) |
+| `--max-images` | no | Limit number of images to draw |
+
+Image files are matched by `file_name` from `ground_truth_coco.json`, so image IDs don't need to be stable across machines -- both JSONs come from the same eval run.
+
 ## ONNX Conversion
 
 After training and evaluating your model, convert it to ONNX format for production deployment:
@@ -687,6 +726,7 @@ torch-training-script/
 ├── src/
 │   ├── train.py                 # Training script
 │   ├── eval.py                  # Evaluation script
+│   ├── visualize.py             # Standalone visualization (no GPU needed)
 │   ├── datasets/
 │   │   └── viam_dataset.py      # JSONL dataset loader
 │   ├── models/
