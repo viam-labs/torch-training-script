@@ -2,7 +2,7 @@
   "$schema": "https://dl.viam.dev/module.schema.json",
   "module_id": "viam:onnx-vision-service",
   "visibility": "public",
-  "url": "https://github.com/viam-modules/torch-training-script",
+  "url": "https://github.com/viam-labs/torch-training-script",
   "description": "A Viam vision service that runs object detection using an ONNX model. Uses only onnxruntime — no PyTorch needed at inference time.",
   "models": [
     {
