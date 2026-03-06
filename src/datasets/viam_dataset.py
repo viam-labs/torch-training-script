@@ -112,6 +112,24 @@ class ViamDataset(Dataset):
         n_with_boxes = sum(1 for s in self.samples if s['boxes'])
         log.info(f"Loaded {len(self.samples)} images ({n_with_boxes} with annotations, "
                  f"{len(self.samples) - n_with_boxes} negative/background)")
+        
+        # Per-class statistics
+        class_ann_counts = {label: 0 for label in self.label_to_id}
+        class_img_counts = {label: 0 for label in self.label_to_id}
+        for s in self.samples:
+            seen_labels = set()
+            for bbox in s['boxes']:
+                label = bbox.get('annotation_label')
+                if label in class_ann_counts:
+                    class_ann_counts[label] += 1
+                    seen_labels.add(label)
+            for label in seen_labels:
+                class_img_counts[label] += 1
+        
+        log.info("Per-class statistics:")
+        for label in sorted(class_ann_counts.keys()):
+            log.info(f"  {label} (id={self.label_to_id[label]}): "
+                     f"{class_ann_counts[label]} annotations in {class_img_counts[label]} images")
     
     def get_classes(self) -> List[str]:
         """Return sorted list of class names."""
