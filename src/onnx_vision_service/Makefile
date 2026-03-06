@@ -33,10 +33,10 @@ $(BINARY): .setup $(SCRIPT_DIR)/main.py $(SCRIPT_DIR)/onnx_vision_service.py $(S
 
 dist/archive.tar.gz: $(BINARY)
 ifeq ($(OS),Windows_NT)
-	cp $(SCRIPT_DIR)/meta.json $(DIST_DIR)/meta.json
+	cp $(REPO_ROOT)/meta.json $(DIST_DIR)/meta.json
 	cd $(DIST_DIR) && tar -czvf archive.tar.gz onnx-vision-service.exe meta.json
 else
-	cp $(SCRIPT_DIR)/meta.json $(DIST_DIR)/meta.json
+	cp $(REPO_ROOT)/meta.json $(DIST_DIR)/meta.json
 	cd $(DIST_DIR) && tar -czvf archive.tar.gz onnx-vision-service meta.json
 endif
 
