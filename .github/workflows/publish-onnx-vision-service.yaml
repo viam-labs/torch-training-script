@@ -28,9 +28,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Copy meta.json to repo root
-        run: cp src/onnx_vision_service/meta.json meta.json
-
       - name: Build and Publish
         if: ${{ github.event_name != 'workflow_dispatch' }}
         uses: viamrobotics/build-action@v1.6
