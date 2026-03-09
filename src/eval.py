@@ -569,13 +569,16 @@ def main(cfg: DictConfig):
     )
 
     ov = pr_results['overall']
-    log.info(f"  {'Class':<20s}  {'Prec':>6s}  {'Rec':>6s}  {'F1':>6s}  {'TP':>5s}  {'FP':>5s}  {'FN':>5s}")
-    log.info(f"  {'-'*20}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
-    for cls_name in sorted(pr_results['per_class']):
+    class_names = sorted(pr_results['per_class'])
+    col_w = max(len(n) for n in class_names + ['OVERALL'])
+    col_w = max(col_w, 7)  # minimum width for "OVERALL"
+    log.info(f"  {'Class':<{col_w}s}  {'Prec':>6s}  {'Rec':>6s}  {'F1':>6s}  {'TP':>5s}  {'FP':>5s}  {'FN':>5s}")
+    log.info(f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
+    for cls_name in class_names:
         c = pr_results['per_class'][cls_name]
-        log.info(f"  {cls_name:<20s}  {c['precision']:6.3f}  {c['recall']:6.3f}  {c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}")
-    log.info(f"  {'-'*20}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
-    log.info(f"  {'OVERALL':<20s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  {ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}")
+        log.info(f"  {cls_name:<{col_w}s}  {c['precision']:6.3f}  {c['recall']:6.3f}  {c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}")
+    log.info(f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
+    log.info(f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  {ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}")
 
     # Add metadata to metrics
     metrics['checkpoint'] = str(checkpoint_path)
