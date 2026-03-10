@@ -19,7 +19,7 @@ from datasets.viam_dataset import ViamDataset
 from models.faster_rcnn_detector import FasterRCNNDetector
 from models.ssdlite_detector import SSDLiteDetector
 from utils.coco_converter import jsonl_to_coco
-from utils.coco_eval import compute_precision_recall, convert_to_xywh, evaluate_coco_predictions
+from utils.coco_eval import compute_det_curves, compute_precision_recall, convert_to_xywh, evaluate_coco_predictions
 from utils.transforms import GPUCollate, build_transforms
 
 try:
@@ -140,30 +140,46 @@ class ONNXModelWrapper:
 
 
 def visualize_predictions(image, predictions, targets, cfg: DictConfig,
-                          id_to_label=None, title="", output_dir=None):
-    img_np = image.cpu().numpy().transpose(1, 2, 0)
-    img_np = np.clip(img_np, 0, 1)
-    fig, ax = plt.subplots(1)
-    ax.imshow(img_np)
-
+                          id_to_label=None, title="", output_dir=None,
+                          filter_labels: set[str] | None = None,
+                          only_with_predictions: bool = False):
     def _label_name(label_id):
         if id_to_label is None:
             return str(int(label_id))
         return id_to_label.get(int(label_id), str(int(label_id)))
 
+    if only_with_predictions:
+        has_pred = predictions is not None and len(predictions['boxes']) > 0 and any(
+            score > cfg.evaluation.confidence_threshold
+            and (not filter_labels or _label_name(label) in filter_labels)
+            for score, label in zip(predictions['scores'], predictions['labels'])
+        )
+        if not has_pred:
+            return
+
+    img_np = image.cpu().numpy().transpose(1, 2, 0)
+    img_np = np.clip(img_np, 0, 1)
+    fig, ax = plt.subplots(1)
+    ax.imshow(img_np)
+
     if predictions is not None and len(predictions['boxes']) > 0:
         for box, score, label in zip(predictions['boxes'], predictions['scores'], predictions['labels']):
+            if score <= cfg.evaluation.confidence_threshold:
+                continue
+            if filter_labels and _label_name(label) not in filter_labels:
+                continue
             x1, y1, x2, y2 = box.cpu().numpy()
-            if score > cfg.evaluation.confidence_threshold:
-                rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1,
-                                         edgecolor='r', facecolor='none')
-                ax.add_patch(rect)
-                ax.text(x1, y1-5, f'{_label_name(label)} {score:.2f}', color='red', fontsize=7)
+            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1,
+                                     edgecolor='r', facecolor='none')
+            ax.add_patch(rect)
+            ax.text(x1, y1-5, f'{_label_name(label)} {score:.2f}', color='red', fontsize=7)
 
     if targets is not None and targets['boxes'].numel() > 0:
         boxes = targets['boxes'].view(-1, 4)
         labels = targets['labels'].view(-1)
         for box, label in zip(boxes, labels):
+            if filter_labels and _label_name(label) not in filter_labels:
+                continue
             x1, y1, x2, y2 = box.cpu().numpy()
             rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1,
                                      edgecolor='lime', facecolor='none', linestyle='--')
@@ -180,6 +196,49 @@ def visualize_predictions(image, predictions, targets, cfg: DictConfig,
         plt.savefig(save_path, dpi=200, bbox_inches='tight')
     plt.close()
 
+def plot_roc_curve(curve_data: dict, output_dir: Path, iou_threshold: float) -> Path:
+    """Plot and save per-class and overall precision-recall curves."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    colors = plt.cm.tab10.colors
+
+    class_names = sorted(curve_data['per_class'].keys())
+    for idx, cls_name in enumerate(class_names):
+        cls = curve_data['per_class'][cls_name]
+        if not cls['recall']:
+            continue
+        color = colors[idx % len(colors)]
+        ax.plot(
+            cls['recall'], cls['precision'],
+            color=color, linewidth=1.5,
+            label=f"{cls_name} (AP={cls['ap']:.3f}, n={cls['n_gt']})",
+        )
+
+    overall = curve_data['overall']
+    if overall['recall']:
+        ax.plot(
+            overall['recall'], overall['precision'],
+            color='black', linewidth=2.5, linestyle='--',
+            label=f"Overall (AP={overall['ap']:.3f}, n={overall['n_gt']})",
+        )
+
+    ax.set_xlabel('Recall', fontsize=13)
+    ax.set_ylabel('Precision', fontsize=13)
+    ax.set_title(f'Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})', fontsize=14)
+    ax.set_xlim([0.0, 1.02])
+    ax.set_ylim([0.0, 1.02])
+    ax.legend(loc='lower left', fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    save_path = output_dir / "precision_recall_curve.png"
+    fig.savefig(save_path, dpi=200, bbox_inches='tight')
+    plt.close(fig)
+    log.info(f"Saved precision-recall curve to {save_path}")
+    return save_path
+
+
 def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     """
     Evaluate model on test set in a single pass: visualize samples, collect confidence
@@ -195,6 +254,10 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
 
     classes = cfg.get('classes', None)
     id_to_label = {idx + 1: label for idx, label in enumerate(sorted(classes))} if classes else None
+
+    vis_labels = cfg.evaluation.get("visualize_labels", None)
+    filter_labels = set(vis_labels) if vis_labels else None
+    only_with_preds = cfg.evaluation.get("visualize_only_with_predictions", False)
     
     # Track confidence score statistics for reporting
     all_scores = []
@@ -217,6 +280,8 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
                         id_to_label=id_to_label,
                         output_dir=vis_dir,
                         title=f"Image {targets[i]['image_id']}",
+                        filter_labels=filter_labels,
+                        only_with_predictions=only_with_preds,
                     )
             
             # Process each image's predictions for confidence stats and COCO collection
@@ -359,17 +424,31 @@ def main(cfg: DictConfig):
     log.info(f"  Classes: {cfg.get('classes', 'auto-discover')}")
     log.info(f"  Test dataset: {cfg.dataset.data.test_jsonl}")
     
-    # Device selection with fallback: CUDA -> CPU
-    requested_device = cfg.model.device
+    # Device selection for eval: CLI override > auto-detect (CUDA > MPS > CPU)
+    # ONNX models only support CUDA/CPU via onnxruntime providers.
+    eval_device = cfg.evaluation.get("device", None)
+    if eval_device:
+        requested_device = eval_device
+    else:
+        requested_device = cfg.model.device
+
     if requested_device == "cuda":
         if torch.cuda.is_available():
             device = torch.device("cuda")
         else:
-            log.warning("CUDA requested but not available. Falling back to CPU.")
+            log.warning("CUDA requested but not available. Trying MPS...")
+            requested_device = "mps"
+
+    if requested_device == "mps":
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            device = torch.device("mps")
+        else:
+            log.warning("MPS requested but not available. Falling back to CPU.")
             device = torch.device("cpu")
-            cfg.model.device = "cpu"
-    else:
+    elif requested_device not in ("cuda",):
         device = torch.device(requested_device)
+
+    cfg.model.device = str(device)
     log.info(f"Using device: {device}")
     
     # Get classes from top-level config
@@ -498,13 +577,23 @@ def main(cfg: DictConfig):
 
     test_transform = build_transforms(cfg, is_train=False, test=True)
 
-    # Set dataloader parameters
-    num_workers = cfg.training.num_workers
+    # Set dataloader parameters.
+    # MPS tensors can't be shared across worker processes, so force num_workers=0.
+    if device.type == 'mps':
+        num_workers = 0
+    else:
+        num_workers = cfg.training.num_workers
     pin_memory = cfg.training.pin_memory and device.type == 'cuda'
-    
+
+    if is_onnx:
+        eval_batch_size = 1
+    else:
+        eval_batch_size = cfg.evaluation.get("batch_size", None) or cfg.training.batch_size
+    log.info(f"Eval batch size: {eval_batch_size}")
+
     test_loader = DataLoader(
         test_dataset,
-        batch_size=cfg.training.batch_size,
+        batch_size=eval_batch_size,
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
@@ -579,6 +668,16 @@ def main(cfg: DictConfig):
         log.info(f"  {cls_name:<{col_w}s}  {c['precision']:6.3f}  {c['recall']:6.3f}  {c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}")
     log.info(f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
     log.info(f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  {ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}")
+
+    # Precision-recall curve
+    if cfg.evaluation.get("plot_roc", False):
+        log.info("Computing precision-recall curves...")
+        curve_data = compute_det_curves(
+            predictions=predictions,
+            coco_gt=coco_gt,
+            iou_threshold=iou_thr,
+        )
+        plot_roc_curve(curve_data, output_dir, iou_thr)
 
     # Add metadata to metrics
     metrics['checkpoint'] = str(checkpoint_path)
