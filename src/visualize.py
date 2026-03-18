@@ -71,8 +71,13 @@ def draw_image(
     confidence_threshold: float,
     title: str,
     output_path: Path,
+    filter_labels: set[str] | None = None,
 ):
-    """Draw predictions (red) and ground truth (lime) on an image and save."""
+    """Draw predictions (red) and ground truth (lime) on an image and save.
+
+    If filter_labels is provided, only boxes whose category name is in the set
+    are drawn (applies to both predictions and ground truth).
+    """
     fig, ax = plt.subplots(1)
     ax.imshow(img)
 
@@ -83,6 +88,8 @@ def draw_image(
     for pred in preds:
         score = pred["score"]
         if score <= confidence_threshold:
+            continue
+        if filter_labels and _cat_name(pred["category_id"]) not in filter_labels:
             continue
         x, y, w, h = pred["bbox"]
         rect = patches.Rectangle(
@@ -97,6 +104,8 @@ def draw_image(
 
     # Ground truth: lime dashed boxes (COCO bbox format [x, y, w, h])
     for ann in gt_anns:
+        if filter_labels and _cat_name(ann["category_id"]) not in filter_labels:
+            continue
         x, y, w, h = ann["bbox"]
         rect = patches.Rectangle(
             (x, y), w, h, linewidth=1,
@@ -146,6 +155,14 @@ def main():
         "--max-images", type=int, default=None,
         help="Maximum number of images to visualize (default: all)",
     )
+    parser.add_argument(
+        "--labels", nargs="+", default=None,
+        help="Only draw boxes for these label names (default: all labels)",
+    )
+    parser.add_argument(
+        "--only-with-predictions", action="store_true",
+        help="Only save images that have at least one prediction above the confidence threshold",
+    )
     args = parser.parse_args()
 
     # --- Validate dataset_dir ---
@@ -172,16 +189,22 @@ def main():
         sys.exit(1)
 
     output_dir = args.output_dir or (args.eval_dir / "visualizations")
+    filter_labels = set(args.labels) if args.labels else None
 
     log.info(f"Predictions : {pred_path}")
     log.info(f"Ground truth: {gt_path}")
     log.info(f"Images from : {data_dir}")
     log.info(f"Output dir  : {output_dir}")
     log.info(f"Confidence  : {args.confidence_threshold}")
+    if filter_labels:
+        log.info(f"Filter labels: {filter_labels}")
 
     # --- Load data ---
     images, categories, gt_by_image = load_ground_truth(gt_path)
     preds_by_image = load_predictions(pred_path)
+
+    def _cat_name(cat_id):
+        return categories.get(cat_id, str(cat_id))
 
     log.info(f"Loaded {len(images)} images, {len(categories)} categories, "
              f"{sum(len(v) for v in preds_by_image.values())} predictions")
@@ -208,6 +231,16 @@ def main():
         preds = preds_by_image.get(image_id, [])
         gt_anns = gt_by_image.get(image_id, [])
 
+        if args.only_with_predictions:
+            has_pred = any(
+                p["score"] > args.confidence_threshold
+                and (not filter_labels or _cat_name(p["category_id"]) in filter_labels)
+                for p in preds
+            )
+            if not has_pred:
+                skipped += 1
+                continue
+
         stem = Path(file_name).stem
         out_path = output_dir / f"Image_{image_id}_{stem}.png"
 
@@ -219,6 +252,7 @@ def main():
             confidence_threshold=args.confidence_threshold,
             title=f"Image {image_id}",
             output_path=out_path,
+            filter_labels=filter_labels,
         )
         drawn += 1
 
