@@ -18,14 +18,20 @@ from PIL import Image
 
 sys.path.insert(0, 'src')
 from models.faster_rcnn_detector import FasterRCNNDetector
+from models.fcos_detector import FCOSDetector
+from models.retinanet_detector import RetinaNetDetector
+from models.ssdlite_detector import SSDLiteDetector
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 
-class FasterRCNNVisionServiceWrapper(nn.Module):
+class DetectionModelWrapper(nn.Module):
     """Wrapper to accept uint8 input and ensure all outputs are float32.
-    
+
+    Works with any torchvision detection model (Faster R-CNN, SSD, RetinaNet)
+    that returns List[Dict] with 'boxes', 'labels', 'scores' in eval mode.
+
     Only converts uint8 [0, 255] → float32 [0, 1].
     Normalization is handled by the model's built-in GeneralizedRCNNTransform.
     """
@@ -121,7 +127,7 @@ def _find_image_with_detections(
     verify the converted model actually produces detections.
     
     Args:
-        model: The wrapped PyTorch model (FasterRCNNVisionServiceWrapper).
+        model: The wrapped PyTorch model (DetectionModelWrapper).
         dataset_dir_str: Path to dataset directory containing dataset.jsonl.
         target_size: (height, width) to resize images to.
         score_threshold: Minimum score to consider a detection valid.
@@ -201,7 +207,7 @@ def _find_image_with_detections(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Convert PyTorch FasterRCNN model to ONNX format')
+    parser = argparse.ArgumentParser(description='Convert PyTorch detection model to ONNX format')
     parser.add_argument('--checkpoint', required=True, help='Path to PyTorch checkpoint (.pth file)')
     parser.add_argument('--config', required=True, help='Path to Hydra config file (.yaml)')
     parser.add_argument('--output', required=True, help='Output path for ONNX model (.onnx file)')
@@ -227,16 +233,26 @@ def main():
     log.info(f"num_classes={len(classes)} (classes: {classes})")
     
     # Load model first (needed to find an image with detections when using dataset-dir)
-    log.info(f"Loading model from {args.checkpoint}")
-    detector = FasterRCNNDetector(cfg)
+    model_name = cfg.model.name
+    log.info(f"Loading {model_name} model from {args.checkpoint}")
+    if model_name == "faster_rcnn":
+        detector = FasterRCNNDetector(cfg)
+    elif model_name == "ssdlite":
+        detector = SSDLiteDetector(cfg)
+    elif model_name == "retinanet":
+        detector = RetinaNetDetector(cfg)
+    elif model_name == "fcos":
+        detector = FCOSDetector(cfg)
+    else:
+        raise ValueError(f"Unknown model: {model_name}. Supported: faster_rcnn, ssdlite, retinanet, fcos")
     checkpoint = torch.load(args.checkpoint, map_location=args.device, weights_only=False)
     detector.load_state_dict(checkpoint['model_state_dict'])
     base_model = detector.model
-    
+
     # Wrap model to accept uint8 input and ensure float32 outputs
     # Normalization is handled by the model's built-in GeneralizedRCNNTransform
-    model = FasterRCNNVisionServiceWrapper(base_model)
-    log.info("✓ Model loaded and wrapped for uint8 input (normalization handled by model's GeneralizedRCNNTransform)")
+    model = DetectionModelWrapper(base_model)
+    log.info(f"✓ {model_name} loaded and wrapped for uint8 input")
     
     # Determine image source
     image_path = None
@@ -274,7 +290,7 @@ def main():
         (dummy_input,),
         args.output,
         export_params=True,
-        opset_version=11,
+        opset_version=13,
         do_constant_folding=False,
         input_names=['image'],
         output_names=['location', 'score', 'category'],

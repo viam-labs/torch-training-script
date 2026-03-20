@@ -18,6 +18,8 @@ from tqdm import tqdm
 
 from datasets.viam_dataset import ViamDataset
 from models.faster_rcnn_detector import FasterRCNNDetector
+from models.fcos_detector import FCOSDetector
+from models.retinanet_detector import RetinaNetDetector
 from models.ssdlite_detector import SSDLiteDetector
 from utils.coco_converter import dataset_to_coco, jsonl_to_coco
 from utils.coco_eval import evaluate_coco
@@ -564,8 +566,14 @@ def main(cfg: DictConfig):
     elif cfg.model.name == "ssdlite":
         model = SSDLiteDetector(cfg).to(device)
         log.info("ssdlite model created and moved to device")
+    elif cfg.model.name == "retinanet":
+        model = RetinaNetDetector(cfg).to(device)
+        log.info("retinanet model created and moved to device")
+    elif cfg.model.name == "fcos":
+        model = FCOSDetector(cfg).to(device)
+        log.info("fcos model created and moved to device")
     else:
-        raise ValueError(f"Unknown model: {cfg.model.name}. Supported models: faster_rcnn, ssdlite")
+        raise ValueError(f"Unknown model: {cfg.model.name}. Supported models: faster_rcnn, ssdlite, retinanet, fcos")
     
     # Apply transfer learning configuration (freezing layers if specified)
     freeze_config = {

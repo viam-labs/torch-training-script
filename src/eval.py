@@ -17,6 +17,8 @@ from tqdm import tqdm
 
 from datasets.viam_dataset import ViamDataset
 from models.faster_rcnn_detector import FasterRCNNDetector
+from models.fcos_detector import FCOSDetector
+from models.retinanet_detector import RetinaNetDetector
 from models.ssdlite_detector import SSDLiteDetector
 from utils.coco_converter import jsonl_to_coco
 from utils.coco_eval import compute_det_curves, compute_precision_recall, convert_to_xywh, evaluate_coco_predictions
@@ -478,8 +480,14 @@ def main(cfg: DictConfig):
     elif cfg.model.name == "ssdlite":
         model = SSDLiteDetector(cfg).to(device)
         log.info("SSDLite model created and moved to device")
+    elif cfg.model.name == "retinanet":
+        model = RetinaNetDetector(cfg).to(device)
+        log.info("RetinaNet model created and moved to device")
+    elif cfg.model.name == "fcos":
+        model = FCOSDetector(cfg).to(device)
+        log.info("FCOS model created and moved to device")
     else:
-        raise ValueError(f"Unknown model: {cfg.model.name}. Supported models: faster_rcnn, ssdlite")
+        raise ValueError(f"Unknown model: {cfg.model.name}. Supported models: faster_rcnn, ssdlite, retinanet, fcos")
  
     # Create test dataset with classes from config
     test_dataset = ViamDataset(

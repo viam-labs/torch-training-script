@@ -197,6 +197,11 @@ def main():
         default=200,
         help="Number of calibration images to use",
     )
+    parser.add_argument(
+        "--exclude-head",
+        action="store_true",
+        help="Exclude detection head nodes from quantization (keeps heads in float32)",
+    )
     args = parser.parse_args()
 
     model_path = Path(args.model)
@@ -250,12 +255,25 @@ def main():
             input_width=input_w,
         )
 
-        # Quantize only safe op types. Faster R-CNN's ROI pooling has
-        # intermediate tensors that can be empty (zero-length) for some
-        # proposals, which crashes the calibration observer nodes. By
-        # restricting quantization to Conv/MatMul/Gemm, we avoid placing
-        # observers in the ROI heads while still quantizing the backbone
-        # and FPN where most of the model weight lives.
+        # Static quantization targeting Conv/MatMul/Gemm ops.
+        # NMS post-processing can produce empty tensors (zero detections)
+        # which crashes calibration observer nodes. Restricting to
+        # Conv/MatMul/Gemm avoids placing observers on post-processing.
+        #
+        # Optionally exclude detection head nodes (--exclude-head) to
+        # preserve score calibration. Quantizing heads aggressively can
+        # collapse scores to zero, killing all detections.
+        nodes_to_exclude = []
+        if args.exclude_head:
+            import onnx as _onnx
+            _model = _onnx.load(preprocessed_path)
+            nodes_to_exclude = [
+                n.name for n in _model.graph.node
+                if "head" in n.name
+            ]
+            log.info(f"Excluding {len(nodes_to_exclude)} head nodes from quantization")
+            del _model
+
         log.info("Running static quantization (Conv/MatMul/Gemm ops)...")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         quantize_static(
@@ -268,6 +286,7 @@ def main():
             activation_type=QuantType.QUInt8,
             calibrate_method=CalibrationMethod.MinMax,
             op_types_to_quantize=["Conv", "MatMul", "Gemm"],
+            nodes_to_exclude=nodes_to_exclude,
         )
     finally:
         os.unlink(preprocessed_path)
