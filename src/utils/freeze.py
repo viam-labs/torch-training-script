@@ -73,6 +73,7 @@ def configure_model_for_transfer_learning(model, model_name: str, freeze_config:
     Architecture-specific components:
     - Faster R-CNN: backbone, fpn, rpn, roi_heads
     - SSDLite: backbone, head
+    - RetinaNet: backbone, fpn, head
     - EfficientNet: backbone, bbox_head, cls_head
     - SimpleDetector: backbone, detection heads
     
@@ -104,11 +105,15 @@ def configure_model_for_transfer_learning(model, model_name: str, freeze_config:
             unfreeze_layers(actual_model, layer_names=['roi_heads.box_predictor'])
         elif model_name == 'ssdlite':
             unfreeze_layers(actual_model, layer_names=['head.classification_head'])
+        elif model_name == 'retinanet':
+            unfreeze_layers(actual_model, layer_names=['head.classification_head'])
+        elif model_name == 'fcos':
+            unfreeze_layers(actual_model, layer_names=['head.classification_head'])
         else:
             raise ValueError(
                 f"freeze_all=True is not supported for model '{model_name}'. "
                 f"Cannot determine which detection head to unfreeze. "
-                f"Supported models: faster_rcnn, ssdlite"
+                f"Supported models: faster_rcnn, ssdlite, retinanet, fcos"
             )
     else:
         layers_to_freeze = []
@@ -119,10 +124,10 @@ def configure_model_for_transfer_learning(model, model_name: str, freeze_config:
         
         # FPN (Faster R-CNN only)
         if freeze_config.get('freeze_fpn', False):
-            if model_name == 'faster_rcnn':
+            if model_name in ('faster_rcnn', 'retinanet', 'fcos'):
                 layers_to_freeze.append('fpn')
             else:
-                log.warning(f"⚠️  freeze_fpn=True ignored for {model_name} (only Faster R-CNN has FPN)")
+                log.warning(f"⚠️  freeze_fpn=True ignored for {model_name} (no FPN)")
         
         # RPN (Faster R-CNN only)
         if freeze_config.get('freeze_rpn', False):

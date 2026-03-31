@@ -1,6 +1,6 @@
 # PyTorch Object Detection Training Script
 
-A PyTorch-based object detection training pipeline supporting Faster R-CNN and SSD-Lite with multiclass detection capabilities. Designed for RGB images using Viam JSONL-formatted datasets.
+A PyTorch-based object detection training pipeline supporting Faster R-CNN, SSD-Lite, RetinaNet, and FCOS with multiclass detection capabilities. Designed for RGB images using Viam JSONL-formatted datasets.
 
 ## Table of Contents
 
@@ -19,6 +19,7 @@ A PyTorch-based object detection training pipeline supporting Faster R-CNN and S
 - [Evaluation](#evaluation)
 - [Visualization (standalone)](#visualization-standalone)
 - [ONNX Conversion](#onnx-conversion)
+- [ONNX Quantization](#onnx-quantization)
 - [Viam Vision Service](#viam-vision-service)
 - [Viam Integration Workflow](#viam-integration-workflow)
 - [Project Structure](#project-structure)
@@ -42,7 +43,7 @@ python src/train.py --config-name=train dataset.data.train_dir=./my_dataset trai
 # Evaluate a trained model
 python src/eval.py dataset_dir=./my_dataset run_dir=outputs/YYYY-MM-DD/HH-MM-SS
 
-# Convert to ONNX for deployment (FasterRCNN only)
+# Convert to ONNX for deployment
 bash convert_model.sh outputs/YYYY-MM-DD/HH-MM-SS --dataset-dir ./my_dataset
 
 # Run hyperparameter optimization (requires: pip install -e ".[sweep]")
@@ -51,12 +52,13 @@ python src/train.py --config-name=sweep --multirun
 
 ## Features
 
-- **Faster R-CNN and SSD-Lite** with MobileNetV3 backbones
+- **Multiple detector architectures**: Faster R-CNN (MobileNetV3-Large + FPN), SSD-Lite (MobileNetV3-Large), RetinaNet (ResNet50-FPN-v2), and FCOS (ResNet50-FPN)
 - **Transfer learning** from pretrained COCO weights with configurable layer freezing
 - **Model EMA** for more stable training
 - **COCO evaluation** (mAP, AP50, AP75) during training and standalone
 - **Hyperparameter optimization** via Optuna sweeps
-- **ONNX export** for production deployment
+- **ONNX export** for production deployment (all model architectures supported)
+- **ONNX quantization** pipeline: static INT8 quantization with calibration, evaluation, and comparison tools
 - **Viam Vision Service module** included for edge inference (no PyTorch needed)
 - **Hydra configuration** for flexible experiment management
 
@@ -168,7 +170,7 @@ Select a model in `configs/train.yaml`:
 
 ```yaml
 defaults:
-  - model: faster_rcnn  # Options: faster_rcnn, ssdlite
+  - model: faster_rcnn  # Options: faster_rcnn, ssdlite, retinanet, fcos
   - dataset: jsonl
   - _self_
 ```
@@ -184,6 +186,18 @@ defaults:
 - Backbone: MobileNetV3-Large
 - Input Size: 320x320
 - Best for: Fast inference, mobile deployment
+
+**RetinaNet:**
+- Config: `configs/model/retinanet.yaml`
+- Backbone: ResNet50-FPN-v2
+- Input Size: 480x640
+- Best for: Single-stage detection with strong accuracy, good balance of speed and precision
+
+**FCOS:**
+- Config: `configs/model/fcos.yaml`
+- Backbone: ResNet50-FPN
+- Input Size: 480x640
+- Best for: Anchor-free detection, simpler architecture with competitive accuracy
 
 ### Regular Training
 
@@ -263,6 +277,8 @@ The training pipeline follows **PyTorch's reference detection training** best pr
 - Uses default torchvision loss weights (no custom weighting)
 - For Faster R-CNN: combines RPN + detection head losses
 - For SSD-Lite: combines classification + localization losses
+- For RetinaNet: combines classification (focal loss) + regression losses
+- For FCOS: combines classification (focal loss) + regression + centerness losses
 
 **Model EMA:**
 - Enabled by default (`training.use_ema: true`)
@@ -481,7 +497,7 @@ Image files are matched by `file_name` from `ground_truth_coco.json`, so image I
 After training and evaluating your model, convert it to ONNX format for production deployment:
 
 ```bash
-# Convert trained model to ONNX (FasterRCNN only)
+# Convert trained model to ONNX (supports all architectures: faster_rcnn, ssdlite, retinanet, fcos)
 # Requires either --dataset-dir or --image-input
 bash convert_model.sh outputs/2026-02-02/15-15-47 --dataset-dir triangles_dataset_small
 
@@ -523,9 +539,63 @@ outputs/2026-02-02/15-15-47/onnx_model/
   - `score`: Confidence scores `[N]`, float32
   - `category`: Class labels `[N]`, float32 (1-indexed)
 
-**Note**: Currently only **FasterRCNN** models are supported for ONNX export.
+All model architectures (Faster R-CNN, SSD-Lite, RetinaNet, FCOS) are supported for ONNX export. The model type is auto-detected from the training config.
 
 For detailed usage and deployment examples, see `CONVERT_MODEL_README.md`.
+
+## ONNX Quantization
+
+After exporting to ONNX, you can quantize the model to INT8 for smaller size and faster inference on edge devices.
+
+### Quantize
+
+```bash
+# Static INT8 quantization with dataset-based calibration
+python quantize_onnx.py \
+    --model outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/model.onnx \
+    --calibration-data ./my_dataset \
+    --num-calibration 200
+
+# Exclude detection head from quantization (preserves score calibration)
+python quantize_onnx.py \
+    --model outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/model.onnx \
+    --calibration-data ./my_dataset \
+    --exclude-head
+```
+
+The quantizer pre-screens calibration images to ensure they produce detections, avoiding empty-tensor crashes in ROI pooling observer nodes. Output is saved alongside the input model as `model_quantized.onnx` by default.
+
+### Evaluate ONNX Models
+
+```bash
+# Evaluate original model
+python evaluate_onnx.py \
+    --model outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/model.onnx \
+    --labels outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/labels.txt \
+    --test-data ./my_test_dataset \
+    --output-dir quantization_results/original
+
+# Evaluate quantized model
+python evaluate_onnx.py \
+    --model outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/model_quantized.onnx \
+    --labels outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/labels.txt \
+    --test-data ./my_test_dataset \
+    --output-dir quantization_results/quantized
+```
+
+All raw predictions are cached (unfiltered) so metrics can be recomputed at any threshold later (e.g., for ROC curves) without re-running inference.
+
+### Compare Original vs Quantized
+
+```bash
+python compare_quantized.py \
+    --original-dir quantization_results/original \
+    --quantized-dir quantization_results/quantized \
+    --original-model outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/model.onnx \
+    --quantized-model outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/model_quantized.onnx
+```
+
+Produces a side-by-side comparison of COCO metrics (AP, AP50, AP75, AR), per-class precision/recall/F1, and model size reduction.
 
 ## Viam Vision Service
 
@@ -719,7 +789,9 @@ torch-training-script/
 │   │   └── jsonl.yaml           # Dataset paths and transforms
 │   ├── model/
 │   │   ├── faster_rcnn.yaml
-│   │   └── ssdlite.yaml
+│   │   ├── ssdlite.yaml
+│   │   ├── retinanet.yaml
+│   │   └── fcos.yaml
 │   └── optimization_results/    # Pre-computed hyperparameters
 │       ├── faster_rcnn.yaml
 │       └── ssdlite.yaml
@@ -731,7 +803,9 @@ torch-training-script/
 │   │   └── viam_dataset.py      # JSONL dataset loader
 │   ├── models/
 │   │   ├── faster_rcnn_detector.py
-│   │   └── ssdlite_detector.py
+│   │   ├── ssdlite_detector.py
+│   │   ├── retinanet_detector.py
+│   │   └── fcos_detector.py
 │   ├── utils/
 │   │   ├── transforms.py         # Data augmentation transforms
 │   │   ├── coco_converter.py     # JSONL to COCO converter
@@ -746,7 +820,10 @@ torch-training-script/
 │       ├── utils.py              # Image decoding utilities
 │       └── build.sh              # Build script (PyInstaller)
 ├── convert_model.sh              # ONNX conversion script (shell wrapper)
-├── convert_to_onnx.py            # ONNX conversion (Python)
+├── convert_to_onnx.py            # ONNX conversion (Python, all architectures)
+├── quantize_onnx.py              # Static INT8 ONNX quantization
+├── evaluate_onnx.py              # ONNX model evaluation with prediction caching
+├── compare_quantized.py          # Compare original vs quantized model metrics
 ├── compare_metrics.py            # Compare PyTorch vs ONNX metrics
 ├── requirements.txt
 └── pyproject.toml
