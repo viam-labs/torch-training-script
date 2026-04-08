@@ -8,6 +8,9 @@ import random
 from typing import Dict, List, Optional, Tuple
 
 import torch
+from torchvision import transforms
+import cv2
+import numpy as np
 import torchvision.transforms.functional as F
 from omegaconf import DictConfig
 
@@ -61,7 +64,12 @@ class DetectionTransform:
                 boxes[:, [1, 3]] *= scale_y  # y coordinates
                 
                 h, w = new_h, new_w
-            
+
+            elif transform_name == 'BackgroundStrip':
+                # strip the background of the image, boxes stay the same
+                dist = params.get('dist', 150)
+                image = background_strip(image, dist)
+
             elif transform_name == 'RandomRotation':
                 degrees = params.get('degrees', 10)
                 expand = params.get('expand', False)
@@ -302,4 +310,66 @@ def build_transforms(cfg: DictConfig, is_train: bool = True, test: bool = False)
         return None
     
     return DetectionTransform(transform_config)
+
+
+def background_strip(image: torch.Tensor, dist: float = 150) -> torch.Tensor:
+    """
+    Strip pixels within Euclidean distance ``dist`` of the k-means background.
+    Distance is computed in **8-bit RGB space** (values 0–255); internally the
+    image is quantized from **float32 in [0, 1]** like ``ToTensor`` output.
+
+    **Input:** ``float32`` ``[3, H, W]``, values in ``[0, 1]``.
+
+    **Output:** ``float32``, same shape and device; ``[0, 1]`` (zeros where stripped).
+    """
+    t = image
+    if t.dim() != 3 or t.shape[0] != 3:
+        raise ValueError(f"Expected [3, H, W], got shape {tuple(t.shape)}")
+
+    t01 = t.detach().float().clamp(0.0, 1.0)
+    rgb_u8 = (
+        (t01 * 255.0).round().clamp(0, 255).to(torch.uint8).permute(1, 2, 0).numpy()
+    )
+    h, w = rgb_u8.shape[0], rgb_u8.shape[1]
+    bkgnd = get_background_from_img_tensor(t01)
+    br, bg, bb = float(bkgnd[0]), float(bkgnd[1]), float(bkgnd[2])
+
+    dist_sq = float(dist) * float(dist)
+    result = rgb_u8.copy()
+    for y in range(h):
+        for x in range(w):
+            r = float(result[y, x, 0])
+            g = float(result[y, x, 1])
+            bpx = float(result[y, x, 2])
+            dr = r - br
+            dg = g - bg
+            db = bpx - bb
+            if dr * dr + dg * dg + db * db <= dist_sq:
+                result[y, x, :] = 0
+
+    out_t = torch.from_numpy(result).permute(2, 0, 1).float().div_(255.0)
+    return out_t.to(dtype=torch.float32)
+
+
+def get_background_from_img_tensor(img: torch.Tensor) -> torch.Tensor:
+    """Get the background color from an image using kmeans clustering.
+    Takes a torch tensor as input: (C, H, W) dtype float32 in [0, 1].
+    Returns the closest color string and the actual RGB vector in [0, 255]."""
+
+    resizedTensor = transforms.Resize((100, 100))(img)
+    resized = np.asarray(resizedTensor.permute(1, 2, 0).contiguous().numpy())
+
+    data = resized.reshape((-1, 3)).astype(np.float32)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.85)
+    _, labels, centers = cv2.kmeans(
+        data, 5, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
+    )
+    background_color = centers[0]
+
+    label_count = {i: 0 for i in range(len(centers))}
+    for label in labels:
+        label_count[label[0]] += 1
+    max_label = max(label_count, key=label_count.get)
+    background_color = centers[max_label]
+    return background_color *255
 
