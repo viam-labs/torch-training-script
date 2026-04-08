@@ -30,7 +30,7 @@ experiment:
 # If None, classes will be auto-discovered from all annotation labels in the dataset
 classes:
   - triangle
-  - triangle_inverted
+  - human_annotated_positive_fish_blob
   
 # Training configuration
 training:
@@ -65,7 +65,7 @@ training:
   
   # Training settings
   gradient_clip: 0.0  # Max gradient norm (0 to disable, PyTorch reference doesn't use it)
-  gradient_accumulation_steps: 1  # Effective batch = batch_size * this value
+  gradient_accumulation_steps: 2  # Effective batch = batch_size * this value
   early_stopping_patience: 15
   num_workers: 1
   pin_memory: false
