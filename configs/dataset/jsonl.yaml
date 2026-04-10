@@ -63,9 +63,9 @@ transform:
     # - name: RandomHorizontalFlip
     #   params:
     #     p: 0.5 
-    # - name: RandomVerticalFlip
-    #   params:
-    #     p: 0.2 
+    - name: RandomVerticalFlip
+      params:
+        p: 0.2
     # - name: ColorJitter
     #   params:
     #     brightness: 0.2 
