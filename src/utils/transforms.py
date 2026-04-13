@@ -358,7 +358,7 @@ def get_background_from_img_tensor(img: torch.Tensor) -> torch.Tensor:
     Returns the closest color string and the actual RGB vector in [0, 255]."""
 
     resizedTensor = transforms.Resize((100, 100))(img)
-    resized = np.asarray(resizedTensor.permute(1, 2, 0).contiguous().numpy())
+    resized = np.asarray(resizedTensor.permute(1, 2, 0).contiguous().cpu().numpy())
 
     data = resized.reshape((-1, 3)).astype(np.float32)
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.85)
