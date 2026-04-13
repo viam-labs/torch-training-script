@@ -35,7 +35,7 @@ classes:
 # Training configuration
 training:
   # Batch size - use 16 for 24GB GPU
-  batch_size: 16
+  batch_size: 8
   num_epochs: 26
   
   # Optimizer settings (PyTorch reference)
