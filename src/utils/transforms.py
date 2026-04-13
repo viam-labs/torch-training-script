@@ -336,25 +336,19 @@ def background_strip(image: torch.Tensor, dist: float = 150) -> torch.Tensor:
         raise ValueError(f"Expected [3, H, W], got shape {tuple(t.shape)}")
 
     t01 = t.detach().float().clamp(0.0, 1.0)
-    rgb_u8 = (t01 * 255.0).round().clamp(0, 255).to(torch.uint8).permute(1, 2, 0).numpy()
-    h, w = rgb_u8.shape[0], rgb_u8.shape[1]
+    rgb_u8_chw = (t01 * 255.0).round().clamp(0, 255).to(torch.uint8)
     bkgnd = get_background_from_img_tensor(t01)
-    br, bg, bb = float(bkgnd[0]), float(bkgnd[1]), float(bkgnd[2])
 
+    bg_rgb = torch.tensor(bkgnd, device=rgb_u8_chw.device, dtype=torch.float32).view(3, 1, 1)
+    diff = rgb_u8_chw.float() - bg_rgb
+    dist_sq_map = (diff * diff).sum(dim=0)  # (H,W)
     dist_sq = float(dist) * float(dist)
-    result = rgb_u8.copy()
-    for y in range(h):
-        for x in range(w):
-            r = float(result[y, x, 0])
-            g = float(result[y, x, 1])
-            bpx = float(result[y, x, 2])
-            dr = r - br
-            dg = g - bg
-            db = bpx - bb
-            if dr * dr + dg * dg + db * db <= dist_sq:
-                result[y, x, :] = 0
+    mask = dist_sq_map <= dist_sq
 
-    out_t = torch.from_numpy(result).permute(2, 0, 1).float().div_(255.0)
+    result_u8 = rgb_u8_chw.clone()
+    result_u8[:, mask] = 0
+
+    out_t = result_u8.float().div_(255.0)
     return out_t.to(dtype=torch.float32)
 
 
