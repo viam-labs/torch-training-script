@@ -16,7 +16,7 @@ hydra:
     direction: minimize
     study_name: object_detection_sweep
     storage: null  # Use in-memory storage (or specify sqlite:///optuna.db for persistence)
-    n_trials: 30
+    n_trials: 15
     n_jobs: 1
     params:
       # Model architecture (optional: sweep over models)
