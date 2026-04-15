@@ -47,6 +47,7 @@ experiment:
 # If None or empty, all annotation labels found in the JSONL file will be used.
 classes:
   - triangle
+  - human_annotated_positive_fish_blob
   
 # Training configuration (starting values, will be overridden by Optuna)
 training:
