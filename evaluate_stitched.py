@@ -2,10 +2,10 @@
 """
 Stitched-pair evaluation for the omni-detector.
 
-Finds single-view source images in a Viam dataset (entries with exactly one
-``sonar_view`` bounding box), randomly pairs them, stitches each pair side-by-
-side into a synthetic "one screen, two views" image, and runs the ONNX model
-three ways:
+Finds single-view source images in a Viam dataset (entries tagged
+``single_view`` in ``classification_annotations``), randomly pairs them,
+stitches each pair side-by-side into a synthetic "one screen, two views"
+image, and runs the ONNX model three ways:
 
 1. On the stitched image (one forward pass).
 2. On each source image alone (two forward passes), with predictions remapped
@@ -47,7 +47,7 @@ from utils.coco_eval import (
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
-SONAR_VIEW_LABEL = "sonar_view"
+SINGLE_VIEW_TAG = "single_view"
 
 
 def _resolve_image_path(dataset_dir: Path, image_path_str: str) -> Path:
@@ -62,7 +62,8 @@ def _resolve_image_path(dataset_dir: Path, image_path_str: str) -> Path:
 
 
 def find_single_view_samples(jsonl_path: Path, dataset_dir: Path) -> List[Dict]:
-    """Return entries that have exactly one ``sonar_view`` bbox and an existing image."""
+    """Return entries tagged ``single_view`` (in ``classification_annotations``)
+    whose image exists on disk."""
     samples: List[Dict] = []
     total = 0
     with open(jsonl_path, "r") as f:
@@ -75,11 +76,11 @@ def find_single_view_samples(jsonl_path: Path, dataset_dir: Path) -> List[Dict]:
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            bboxes = entry.get("bounding_box_annotations", []) or []
-            sonar_view_count = sum(
-                1 for b in bboxes if b.get("annotation_label") == SONAR_VIEW_LABEL
-            )
-            if sonar_view_count != 1:
+            tags = {
+                a.get("annotation_label")
+                for a in entry.get("classification_annotations", []) or []
+            }
+            if SINGLE_VIEW_TAG not in tags:
                 continue
             image_path_str = entry.get("image_path", "")
             if not image_path_str:
@@ -91,7 +92,7 @@ def find_single_view_samples(jsonl_path: Path, dataset_dir: Path) -> List[Dict]:
             samples.append(entry)
     log.info(
         f"Scanned {total} JSONL entries; found {len(samples)} single-view samples "
-        f"(exactly 1 '{SONAR_VIEW_LABEL}' bbox, image exists)."
+        f"(tagged '{SINGLE_VIEW_TAG}', image exists)."
     )
     return samples
 
