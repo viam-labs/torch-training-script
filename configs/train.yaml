@@ -29,8 +29,9 @@ experiment:
 #
 # If None, classes will be auto-discovered from all annotation labels in the dataset
 classes:
-  - triangle
   - human_annotated_positive_fish_blob
+  - triangle
+
   
 # Training configuration
 training:
