@@ -16,7 +16,7 @@ hydra:
     direction: minimize
     study_name: object_detection_sweep
     storage: null  # Use in-memory storage (or specify sqlite:///optuna.db for persistence)
-    n_trials: 30
+    n_trials: 15
     n_jobs: 1
     params:
       # Model architecture (optional: sweep over models)
@@ -46,7 +46,9 @@ experiment:
 # Only annotations with labels in this list will be included.
 # If None or empty, all annotation labels found in the JSONL file will be used.
 classes:
+  - human_annotated_positive_fish_blob
   - triangle
+
   
 # Training configuration (starting values, will be overridden by Optuna)
 training:

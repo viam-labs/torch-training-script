@@ -54,6 +54,9 @@ transform:
     - name: Resize
       params:
         size: ${model.transform.input_size}
+    - name: BackgroundStrip
+      params:
+        dist: 150
     # Augmentations (uncomment as needed):
     # - name: RandomRotation
     #   params: 
@@ -85,8 +88,14 @@ transform:
     - name: Resize
       params:
         size: ${model.transform.input_size}
+    - name: BackgroundStrip
+      params:
+        dist: 150
         
   test:
     - name: Resize
       params:
         size: ${model.transform.input_size}
+    - name: BackgroundStrip
+      params:
+        dist: 150

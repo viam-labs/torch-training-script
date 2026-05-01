@@ -29,13 +29,14 @@ experiment:
 #
 # If None, classes will be auto-discovered from all annotation labels in the dataset
 classes:
+  - human_annotated_positive_fish_blob
   - triangle
-  - triangle_inverted
+
   
 # Training configuration
 training:
   # Batch size - use 16 for 24GB GPU
-  batch_size: 16
+  batch_size: 8
   num_epochs: 26
   
   # Optimizer settings (PyTorch reference)
@@ -65,7 +66,7 @@ training:
   
   # Training settings
   gradient_clip: 0.0  # Max gradient norm (0 to disable, PyTorch reference doesn't use it)
-  gradient_accumulation_steps: 1  # Effective batch = batch_size * this value
+  gradient_accumulation_steps: 2  # Effective batch = batch_size * this value
   early_stopping_patience: 15
   num_workers: 1
   pin_memory: false
