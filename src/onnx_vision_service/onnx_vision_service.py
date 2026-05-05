@@ -25,6 +25,7 @@ from typing import (
     Union,
 )
 
+import cv2
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
@@ -79,6 +80,7 @@ class OnnxVisionService(Vision, Reconfigurable):
         self.min_confidence: float = 0.0
         self.input_height: int = 0
         self.input_width: int = 0
+        self.background_strip_dist: float = 0.0
         self.properties = Properties(
             classifications_supported=False,
             detections_supported=True,
@@ -160,6 +162,13 @@ class OnnxVisionService(Vision, Reconfigurable):
         if "min_confidence" in config.attributes.fields:
             self.min_confidence = config.attributes.fields[
                 "min_confidence"
+            ].number_value
+
+        # -- Optional preprocessing ------------------------------------ #
+        self.background_strip_dist = 0.0
+        if "background_strip_dist" in config.attributes.fields:
+            self.background_strip_dist = config.attributes.fields[
+                "background_strip_dist"
             ].number_value
 
         # -- ONNX model ------------------------------------------------ #
@@ -350,6 +359,53 @@ class OnnxVisionService(Vision, Reconfigurable):
     # ------------------------------------------------------------------ #
 
     @staticmethod
+    def _background_strip_np(img_hwc_u8: np.ndarray, dist: float = 150) -> np.ndarray:
+        """Strip pixels within Euclidean distance ``dist`` of the k-means background.
+
+        This is a numpy→numpy port of `src/utils/transforms.py::background_strip`
+        with the same behavior:
+        - Distance computed in **8-bit RGB space** (values 0–255)
+        - Background color estimated via k-means on a resized 100×100 image
+
+        Args:
+            img_hwc_u8: uint8 image of shape [H, W, 3] in RGB order.
+            dist: Euclidean distance threshold in 8-bit RGB space.
+
+        Returns:
+            uint8 image [H, W, 3] (zeros where stripped).
+        """
+        if not isinstance(img_hwc_u8, np.ndarray):
+            raise TypeError(f"Expected numpy.ndarray, got {type(img_hwc_u8)}")
+        if img_hwc_u8.ndim != 3 or img_hwc_u8.shape[2] != 3:
+            raise ValueError(f"Expected [H, W, 3], got shape {img_hwc_u8.shape}")
+        if img_hwc_u8.dtype != np.uint8:
+            raise ValueError(f"Expected dtype uint8, got {img_hwc_u8.dtype}")
+
+        # Mirror `get_background_from_img_tensor()`:
+        # - reshape image as 100x100 float32 in [0, 1]
+        # - run cv2.kmeans with k=5 and count the most common label
+        resized = cv2.resize(img_hwc_u8, (100, 100), interpolation=cv2.INTER_LINEAR)
+        data = (resized.astype(np.float32) / 255.0).reshape((-1, 3)).astype(np.float32)
+        
+        criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.85)
+        _compactness, labels, centers = cv2.kmeans(
+            data, 5, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
+        )
+        labels = labels.reshape(-1)
+        max_label = int(np.bincount(labels, minlength=centers.shape[0]).argmax())
+        background_color_01 = centers[max_label]  # float32 in [0,1]
+        bg_rgb_255 = background_color_01 * 255.0  # float32 in [0,255]
+
+        diff = img_hwc_u8.astype(np.float32) - bg_rgb_255.reshape((1, 1, 3))
+        dist_sq_map = np.sum(diff * diff, axis=2)  # (H, W)
+        dist_sq = float(dist) * float(dist)
+        mask = dist_sq_map <= dist_sq
+
+        out = img_hwc_u8.copy()
+        out[mask] = 0
+        return out
+
+    @staticmethod
     def _load_labels(labels_path: str) -> List[str]:
         """Load class labels from a text file (one label per line)."""
         path = Path(labels_path)
@@ -379,6 +435,8 @@ class OnnxVisionService(Vision, Reconfigurable):
 
         # [H, W, C] uint8 → [C, H, W] uint8 → [1, C, H, W] uint8
         img_np = np.array(img_resized, dtype=np.uint8)
+        if self.background_strip_dist and self.background_strip_dist > 0:
+            img_np = self._background_strip_np(img_np, dist=self.background_strip_dist)
         img_chw = img_np.transpose(2, 0, 1)
         return np.expand_dims(img_chw, axis=0)
 
