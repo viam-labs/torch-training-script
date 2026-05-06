@@ -320,12 +320,19 @@ def main():
     log.info("\nTesting ONNX inference on same image...")
     sess = ort.InferenceSession(args.output)
     outputs = sess.run(None, {'image': dummy_input.numpy()})
-    boxes_onnx, labels_onnx, scores_onnx = outputs
+    # IMPORTANT: outputs are in the same order as output_names passed to torch.onnx.export
+    # output_names=['location', 'score', 'category']
+    locations_onnx, scores_onnx, categories_onnx = outputs
     onnx_confident = int((scores_onnx > 0.3).sum())
-    log.info(f"✓ ONNX test: {len(boxes_onnx)} detections ({onnx_confident} with score > 0.3)")
-    log.info(f"  Output types: boxes={boxes_onnx.dtype}, labels={labels_onnx.dtype}, scores={scores_onnx.dtype}")
+    log.info(f"✓ ONNX test: {len(locations_onnx)} detections ({onnx_confident} with score > 0.3)")
+    log.info(
+        "  Output types: location=%s, score=%s, category=%s",
+        locations_onnx.dtype,
+        scores_onnx.dtype,
+        categories_onnx.dtype,
+    )
     if len(scores_onnx) > 0:
-        log.info(f"  Top score: {scores_onnx[0]:.4f}")
+        log.info(f"  Top score: {float(scores_onnx[0]):.4f}")
     
     # Compare PyTorch vs ONNX detections
     log.info("\n" + ("-" * 70))
