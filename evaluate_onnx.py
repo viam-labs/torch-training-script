@@ -9,9 +9,11 @@ import argparse
 import json
 import logging
 import os
+import random
 import sys
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import onnxruntime as ort
 import torch
@@ -21,10 +23,53 @@ from tqdm import tqdm
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 from utils.coco_converter import jsonl_to_coco
-from utils.coco_eval import compute_precision_recall, convert_to_xywh, evaluate_coco_predictions
+from utils.coco_eval import compute_det_curves, compute_precision_recall, convert_to_xywh, evaluate_coco_predictions
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
+
+
+def plot_roc_curve(curve_data: dict, output_dir: Path, iou_threshold: float) -> Path:
+    """Plot and save per-class and overall precision-recall curves."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    colors = plt.cm.tab10.colors
+
+    class_names = sorted(curve_data['per_class'].keys())
+    for idx, cls_name in enumerate(class_names):
+        cls = curve_data['per_class'][cls_name]
+        if not cls['recall']:
+            continue
+        color = colors[idx % len(colors)]
+        ax.plot(
+            cls['recall'], cls['precision'],
+            color=color, linewidth=1.5,
+            label=f"{cls_name} (AP={cls['ap']:.3f}, n={cls['n_gt']})",
+        )
+
+    overall = curve_data['overall']
+    if overall['recall']:
+        ax.plot(
+            overall['recall'], overall['precision'],
+            color='black', linewidth=2.5, linestyle='--',
+            label=f"Overall (AP={overall['ap']:.3f}, n={overall['n_gt']})",
+        )
+
+    ax.set_xlabel('Recall', fontsize=13)
+    ax.set_ylabel('Precision', fontsize=13)
+    ax.set_title(f'Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})', fontsize=14)
+    ax.set_xlim([0.0, 1.02])
+    ax.set_ylim([0.0, 1.02])
+    ax.legend(loc='lower left', fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    save_path = output_dir / "precision_recall_curve.png"
+    fig.savefig(save_path, dpi=200, bbox_inches='tight')
+    plt.close(fig)
+    log.info(f"Saved precision-recall curve to {save_path}")
+    return save_path
 
 
 def _resolve_image_path(dataset_dir: Path, image_path_str: str) -> Path:
@@ -45,6 +90,7 @@ def run_inference(
     classes: list[str],
     input_h: int,
     input_w: int,
+    vertical_flip_p: float = 0.0,
 ) -> list[dict]:
     """
     Run ONNX inference on all images in a dataset and return COCO-format predictions.
@@ -90,6 +136,11 @@ def run_inference(
         if expects_float:
             img_np = img_np.astype(np.float32)
 
+        # Vertical flip with probability p (test-time augmentation)
+        flipped = vertical_flip_p > 0 and random.random() < vertical_flip_p
+        if flipped:
+            img_np = img_np[:, :, ::-1, :].copy()
+
         # Run inference
         outputs = session.run(None, {input_name: img_np})
         boxes, labels, scores = outputs
@@ -111,6 +162,13 @@ def run_inference(
         if len(boxes) == 0:
             image_count += 1
             continue
+
+        # Unflip boxes back to original orientation so they match ground truth
+        if flipped:
+            y1 = boxes[:, 1].copy()
+            y2 = boxes[:, 3].copy()
+            boxes[:, 1] = input_h - y2
+            boxes[:, 3] = input_h - y1
 
         # Scale boxes from model input coords to original image coords
         scale_w = orig_w / input_w
@@ -175,6 +233,18 @@ def main():
         default=0.5,
         help="Confidence threshold for precision/recall computation",
     )
+    parser.add_argument(
+        "--vertical-flip",
+        type=float,
+        default=0.0,
+        metavar="P",
+        help="Apply random vertical flip with probability P before inference (default: 0, disabled)",
+    )
+    parser.add_argument(
+        "--plot-roc",
+        action="store_true",
+        help="Save a precision-recall curve plot to the output directory",
+    )
     args = parser.parse_args()
 
     model_path = Path(args.model)
@@ -208,12 +278,15 @@ def main():
     log.info(f"Ground truth: {len(coco_gt.imgs)} images, {len(coco_gt.anns)} annotations")
 
     # Run inference and collect ALL predictions (unfiltered)
+    if args.vertical_flip > 0:
+        log.info(f"Vertical flip enabled with p={args.vertical_flip}")
     predictions = run_inference(
         model_path=str(model_path),
         dataset_dir=dataset_dir,
         classes=classes,
         input_h=input_h,
         input_w=input_w,
+        vertical_flip_p=args.vertical_flip,
     )
 
     # Cache all predictions
@@ -267,6 +340,16 @@ def main():
         f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  "
         f"{ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}"
     )
+
+    # Precision-recall curve
+    if args.plot_roc:
+        log.info("Computing precision-recall curves...")
+        curve_data = compute_det_curves(
+            predictions=predictions,
+            coco_gt=coco_gt,
+            iou_threshold=args.iou_threshold,
+        )
+        plot_roc_curve(curve_data, output_dir, args.iou_threshold)
 
     # Save metrics
     metrics["precision_recall"] = pr_results
