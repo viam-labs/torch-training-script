@@ -66,6 +66,7 @@ vision-service = [
     "onnxruntime>=1.16.0",
     "numpy>=1.21.0",
     "pillow>=9.0.0",
+    "opencv-python-headless>=4.8.0",
     "pyinstaller>=6.0.0",
     "google-api-python-client",
 ]
