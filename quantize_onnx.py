@@ -15,6 +15,7 @@ import random
 import tempfile
 from pathlib import Path
 
+import cv2
 import numpy as np
 import onnxruntime as ort
 from PIL import Image
@@ -66,11 +67,59 @@ def _load_image_paths(dataset_dir: Path) -> list[Path]:
     return paths
 
 
-def _load_image_as_uint8(img_path: Path, input_h: int, input_w: int) -> np.ndarray:
-    """Load an image, resize, and return as uint8 [1, 3, H, W] numpy array."""
+def _background_strip_np(img_hwc_u8: np.ndarray, dist: float = 150) -> np.ndarray:
+    """Strip pixels within Euclidean distance ``dist`` of the k-means background.
+
+    Standalone numpy port of `src/utils/transforms.py::background_strip` (same
+    behavior as `onnx_vision_service.py::_background_strip_np`): the background
+    color is estimated via k-means (k=5) on a 100x100 resize, and pixels within
+    ``dist`` of it in 8-bit RGB space are zeroed. Kept self-contained so this
+    quant tool needs only cv2+numpy.
+
+    Calibration images must be stripped the same way the model was trained and
+    the same way `onnx_vision_service` strips at inference, otherwise the INT8
+    activation ranges are computed over the wrong input distribution.
+
+    Args:
+        img_hwc_u8: uint8 image [H, W, 3] in RGB order.
+        dist: Euclidean distance threshold in 8-bit RGB space.
+
+    Returns:
+        uint8 image [H, W, 3] (zeros where stripped).
+    """
+    resized = cv2.resize(img_hwc_u8, (100, 100), interpolation=cv2.INTER_LINEAR)
+    data = (resized.astype(np.float32) / 255.0).reshape((-1, 3)).astype(np.float32)
+
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 0.85)
+    _compactness, labels, centers = cv2.kmeans(
+        data, 5, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
+    )
+    labels = labels.reshape(-1)
+    max_label = int(np.bincount(labels, minlength=centers.shape[0]).argmax())
+    bg_rgb_255 = centers[max_label] * 255.0  # float32 in [0,255]
+
+    diff = img_hwc_u8.astype(np.float32) - bg_rgb_255.reshape((1, 1, 3))
+    dist_sq_map = np.sum(diff * diff, axis=2)  # (H, W)
+    mask = dist_sq_map <= (float(dist) * float(dist))
+
+    out = img_hwc_u8.copy()
+    out[mask] = 0
+    return out
+
+
+def _load_image_as_uint8(
+    img_path: Path, input_h: int, input_w: int, background_strip_dist: float = 0.0
+) -> np.ndarray:
+    """Load an image, resize, optionally background-strip, return uint8 [1, 3, H, W].
+
+    When ``background_strip_dist > 0`` the resized image is background-stripped
+    (matching training/deployment preprocessing) before being returned.
+    """
     img = Image.open(img_path).convert("RGB")
     img_resized = img.resize((input_w, input_h), Image.BILINEAR)
     img_np = np.array(img_resized)  # [H, W, C] uint8
+    if background_strip_dist > 0:
+        img_np = _background_strip_np(img_np, background_strip_dist)
     img_np = img_np.transpose(2, 0, 1)  # [C, H, W]
     return img_np[np.newaxis, ...]  # [1, C, H, W]
 
@@ -85,6 +134,7 @@ def _prescreen_calibration_images(
     score_threshold: float = 0.1,
     max_candidates: int = 500,
     seed: int = 42,
+    background_strip_dist: float = 0.0,
 ) -> list[Path]:
     """
     Pre-screen images to find ones that produce detections.
@@ -112,7 +162,7 @@ def _prescreen_calibration_images(
     for img_path in candidates:
         checked += 1
         try:
-            img_np = _load_image_as_uint8(img_path, input_h, input_w)
+            img_np = _load_image_as_uint8(img_path, input_h, input_w, background_strip_dist)
             outputs = session.run(None, {input_name: img_np})
             _, _, scores = outputs
 
@@ -149,16 +199,19 @@ class DatasetCalibrationReader(CalibrationDataReader):
         input_name: str,
         input_height: int,
         input_width: int,
+        background_strip_dist: float = 0.0,
     ):
         self.input_name = input_name
         self.input_height = input_height
         self.input_width = input_width
+        self.background_strip_dist = background_strip_dist
         self.image_paths = image_paths
         self.index = 0
 
         log.info(
             f"Calibration reader: {len(self.image_paths)} pre-screened images, "
-            f"input size {input_height}x{input_width}"
+            f"input size {input_height}x{input_width}, "
+            f"background_strip_dist={background_strip_dist}"
         )
 
     def get_next(self):
@@ -168,7 +221,9 @@ class DatasetCalibrationReader(CalibrationDataReader):
         img_path = self.image_paths[self.index]
         self.index += 1
 
-        img_batch = _load_image_as_uint8(img_path, self.input_height, self.input_width)
+        img_batch = _load_image_as_uint8(
+            img_path, self.input_height, self.input_width, self.background_strip_dist
+        )
         return {self.input_name: img_batch}
 
 
@@ -202,6 +257,13 @@ def main():
         action="store_true",
         help="Exclude detection head nodes from quantization (keeps heads in float32)",
     )
+    parser.add_argument(
+        "--background-strip-dist",
+        type=float,
+        default=150.0,
+        help="Background-strip calibration/pre-screen images at this distance "
+        "(8-bit RGB), matching training/deployment. Set 0 to disable. Default: 150",
+    )
     args = parser.parse_args()
 
     model_path = Path(args.model)
@@ -229,6 +291,7 @@ def main():
         input_h=input_h,
         input_w=input_w,
         num_needed=args.num_calibration,
+        background_strip_dist=args.background_strip_dist,
     )
 
     if not good_paths:
@@ -253,6 +316,7 @@ def main():
             input_name=input_name,
             input_height=input_h,
             input_width=input_w,
+            background_strip_dist=args.background_strip_dist,
         )
 
         # Static quantization targeting Conv/MatMul/Gemm ops.
