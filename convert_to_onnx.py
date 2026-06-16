@@ -345,8 +345,11 @@ def main():
     
     # Write labels.txt for Viam (one label per line, same order as training)
     labels_path = Path(args.output).parent / "labels.txt"
+    # Write labels in the SAME sorted order the model predicts (ViamDataset sorts
+    # class names, so model category id 1 = first sorted label, etc.). The Viam
+    # vision service maps model output ids -> names via this file, so order matters.
     with open(labels_path, 'w') as f:
-        for label in classes:
+        for label in sorted(classes):
             f.write(f"{label}\n")
     log.info(f"✓ Labels file written: {labels_path} ({len(classes)} classes)")
     

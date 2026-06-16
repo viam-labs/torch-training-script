@@ -2,7 +2,7 @@
 # Usage: python src/train.py --config-name=train
 
 defaults:
-  - model: faster_rcnn  # Choose: faster_rcnn, ssdlite, effnet, custom_detector
+  - model: fcos  # Choose: faster_rcnn, ssdlite, retinanet, fcos
   - dataset: jsonl
   # - optimization_results: faster_rcnn  # Match the model you chose above
   - _self_
@@ -32,11 +32,10 @@ classes:
   - human_annotated_positive_fish_blob
   - triangle
 
-  
 # Training configuration
 training:
-  # Batch size - use 16 for 24GB GPU
-  batch_size: 8
+  # Batch size - use 16 for 24GB GPU; 4 fits 16GB (RTX 4080) with FCOS-ResNet50 @ 1280x720
+  batch_size: 4
   num_epochs: 26
   
   # Optimizer settings (PyTorch reference)
@@ -76,7 +75,7 @@ training:
   ema_decay: 0.9998  # EMA decay rate (0.9998 or 0.9999)
   
   # Transfer Learning
-  pretrained: false  # Use pretrained weights (COCO) for transfer learning
+  pretrained: true  # Use pretrained weights (COCO) for transfer learning
   
   # Layer Freezing Strategy (only applies when pretrained=true)
   freeze_backbone: false  # Freeze backbone (ALL MODELS: feature extractor)

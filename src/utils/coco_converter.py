@@ -60,7 +60,14 @@ def jsonl_to_coco(
                 except json.JSONDecodeError:
                     continue
         classes = sorted(all_labels)
-    
+
+    # Sort classes so COCO category IDs match ViamDataset's label_to_id, which
+    # always sorts (see datasets/viam_dataset.py). The detection model is trained
+    # with those sorted IDs and predicts them at inference, so the ground-truth
+    # categories must use the same order or COCO will score predictions against
+    # the wrong class (near-zero AP).
+    classes = sorted(classes)
+
     # Create categories (1-based IDs, 0 is background)
     categories = [
         {
