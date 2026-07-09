@@ -185,41 +185,62 @@ class DetectionTransform:
         return image, new_boxes
 
 
-class GPUCollate:
-    """Collate function that moves CPU-transformed samples to the target device."""
+class DetectionCollate:
+    """Collate detection samples on the CPU.
 
-    def __init__(self, device: torch.device):
-        self.device = device
+    Stacks images into a [B, C, H, W] batch and returns targets as a list of
+    dicts, all left on the CPU. Moving tensors to the GPU is deliberately NOT
+    done here: this collate runs inside DataLoader worker processes, and
+    producing CUDA tensors in workers forces fragile CUDA-IPC sharing back to
+    the main process (which warns about leaked shared tensors and can crash
+    with an illegal instruction on worker teardown). Move to the device with
+    ``batch_to_device`` in the main-process loop instead.
+    """
 
     def __call__(self, batch: List[Tuple[torch.Tensor, Dict]]) -> Tuple[torch.Tensor, List[Dict]]:
         """
-        Collate batch of samples.
+        Collate batch of samples (CPU only).
 
         Args:
             batch: List of (image, target) tuples with CPU tensors
 
         Returns:
-            Batched images tensor [B, C, H, W] and list of targets
+            Batched images tensor [B, C, H, W] and list of targets (on CPU)
         """
-        images = []
-        targets = []
-
-        for image, target in batch:
-            image_on_device = image.to(self.device)
-
-            target_on_device = {}
-            for key, value in target.items():
-                if isinstance(value, torch.Tensor):
-                    target_on_device[key] = value.to(self.device)
-                else:
-                    target_on_device[key] = value
-
-            images.append(image_on_device)
-            targets.append(target_on_device)
-
+        images = [image for image, _ in batch]
+        targets = [target for _, target in batch]
         images = torch.stack(images, dim=0)
-
         return images, targets
+
+
+def batch_to_device(images, targets, device, non_blocking: bool = False):
+    """Move a collated detection batch to ``device`` in the main process.
+
+    Pairs with ``DetectionCollate`` (which keeps everything on the CPU). Call
+    this at the top of the training/eval loop so CUDA tensors are only ever
+    created in the main process, never in DataLoader workers.
+
+    Args:
+        images: Batched image tensor [B, C, H, W].
+        targets: List of per-image target dicts; tensor values are moved,
+            non-tensor values are left as-is.
+        device: Target device.
+        non_blocking: Use async host->device copies. Only actually async when
+            the source tensors are pinned (DataLoader ``pin_memory=True``);
+            safe to leave True otherwise (falls back to a blocking copy).
+
+    Returns:
+        (images, targets) with all tensors on ``device``.
+    """
+    images = images.to(device, non_blocking=non_blocking)
+    moved_targets = [
+        {
+            key: value.to(device, non_blocking=non_blocking) if isinstance(value, torch.Tensor) else value
+            for key, value in target.items()
+        }
+        for target in targets
+    ]
+    return images, moved_targets
 
 
 def attach_dataset_transform(dataset, transform: Optional[DetectionTransform]):

@@ -22,7 +22,7 @@ from models.retinanet_detector import RetinaNetDetector
 from models.ssdlite_detector import SSDLiteDetector
 from utils.coco_converter import jsonl_to_coco
 from utils.coco_eval import compute_det_curves, compute_precision_recall, convert_to_xywh, evaluate_coco_predictions
-from utils.transforms import GPUCollate, build_transforms, attach_dataset_transform
+from utils.transforms import DetectionCollate, batch_to_device, build_transforms, attach_dataset_transform
 
 try:
     import onnxruntime as ort
@@ -270,6 +270,8 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     
     with torch.no_grad():
         for batch_idx, (images, targets) in enumerate(tqdm(data_loader, desc="Evaluating")):
+            # Collate is CPU-only; move to device here (main process).
+            images, targets = batch_to_device(images, targets, device, non_blocking=True)
             outputs = model(images)
             
             if visualize:
@@ -606,7 +608,7 @@ def main(cfg: DictConfig):
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        collate_fn=GPUCollate(device),
+        collate_fn=DetectionCollate(),
     )
 
     # Evaluate model (visualize samples + collect predictions)

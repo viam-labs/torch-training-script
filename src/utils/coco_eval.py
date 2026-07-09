@@ -14,6 +14,8 @@ from pycocotools.coco import COCO
 from pycocotools.cocoeval import COCOeval
 from tqdm import tqdm
 
+from utils.transforms import batch_to_device
+
 log = logging.getLogger(__name__)
 
 
@@ -51,9 +53,12 @@ def collect_predictions(
     """
     model.eval()
     coco_results = []
-    
+
     with torch.no_grad():
         for images, targets in tqdm(data_loader, desc='Collecting Predictions'):
+            # Collate is CPU-only; move to device here (main process).
+            images, targets = batch_to_device(images, targets, device, non_blocking=True)
+
             # Run inference (no targets passed to model)
             outputs = model(images)
             

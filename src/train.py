@@ -27,7 +27,7 @@ from utils.coco_eval import evaluate_coco
 from utils.freeze import configure_model_for_transfer_learning
 from utils.model_ema import ModelEMA
 from utils.seed import set_seed
-from utils.transforms import DetectionTransform, GPUCollate, attach_dataset_transform, compute_dataset_stats
+from utils.transforms import DetectionTransform, DetectionCollate, attach_dataset_transform, batch_to_device, compute_dataset_stats
 
 log = logging.getLogger(__name__)
 
@@ -83,10 +83,15 @@ def train_one_epoch(model, optimizer, data_loader, epoch, cfg, model_ema=None):
     train_losses = {}  # Dynamic loss tracking - will auto-populate based on model's loss keys
     
     pbar = tqdm(data_loader, desc=f'Epoch {epoch+1} [Train]')
-    
+
     optimizer.zero_grad()
-    
+
+    # Collate is CPU-only; move each batch to the model's device here (main process).
+    device = next(model.parameters()).device
+
     for batch_idx, (images, targets) in enumerate(pbar):
+        images, targets = batch_to_device(images, targets, device, non_blocking=True)
+
         # Forward pass - model returns loss dict in training mode
         loss_dict = model(images, targets)
 
@@ -167,6 +172,7 @@ def evaluate_loss(model, data_loader, device, epoch, cfg):
     
     with torch.no_grad():
         for images, targets in data_loader:
+            images, targets = batch_to_device(images, targets, device, non_blocking=True)
             loss_dict = model(images, targets)
             batch_loss = sum(loss_dict.values()).item()
             val_loss += batch_loss
@@ -567,7 +573,7 @@ def main(cfg: DictConfig):
         shuffle=True,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        collate_fn=GPUCollate(device),
+        collate_fn=DetectionCollate(),
     )
     
     val_loader = DataLoader(
@@ -576,7 +582,7 @@ def main(cfg: DictConfig):
         shuffle=False,
         num_workers=num_workers,
         pin_memory=pin_memory,
-        collate_fn=GPUCollate(device),
+        collate_fn=DetectionCollate(),
     )
     
     # Create model (now with correct num_classes)
