@@ -68,6 +68,11 @@ training:
   # Weights each image by the inverse image-frequency of its rarest present class.
   use_weighted_sampler: false
 
+  # Class imbalance: weight the ROI classification loss by inverse class frequency.
+  # Faster R-CNN only (warn + skip otherwise). Weights both train and val loss.
+  class_balanced_loss: false
+  class_balanced_loss_background_weight: 1.0  # weight for background class (index 0)
+
   # Training settings
   gradient_clip: 0.0  # Max gradient norm (0 to disable, PyTorch reference doesn't use it)
   gradient_accumulation_steps: 2  # Effective batch = batch_size * this value

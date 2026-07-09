@@ -22,6 +22,11 @@ from models.faster_rcnn_detector import FasterRCNNDetector
 from models.fcos_detector import FCOSDetector
 from models.retinanet_detector import RetinaNetDetector
 from models.ssdlite_detector import SSDLiteDetector
+from utils.class_balance import (
+    apply_weighted_fastrcnn_loss,
+    compute_class_annotation_counts,
+    compute_class_weights,
+)
 from utils.coco_converter import dataset_to_coco, jsonl_to_coco
 from utils.coco_eval import evaluate_coco
 from utils.freeze import configure_model_for_transfer_learning
@@ -681,7 +686,40 @@ def main(cfg: DictConfig):
         'freeze_all': cfg.training.get('freeze_all', False),
     }
     configure_model_for_transfer_learning(model, cfg.model.name, freeze_config)
-    
+
+    # Optional class-balanced classification loss (Faster R-CNN only).
+    # Weights the ROI head's cross-entropy by inverse class frequency so rare
+    # classes contribute more to the gradient. Patches torchvision's global
+    # fastrcnn_loss, so BOTH train and val loss become weighted (consistent
+    # objective for model selection).
+    if cfg.training.get('class_balanced_loss', False):
+        if cfg.model.name != 'faster_rcnn':
+            log.warning(
+                f"class_balanced_loss is only implemented for faster_rcnn; "
+                f"skipping for model '{cfg.model.name}'."
+            )
+        else:
+            counts = compute_class_annotation_counts(train_dataset)
+            bg_weight = cfg.training.get('class_balanced_loss_background_weight', 1.0)
+            class_weights = compute_class_weights(
+                counts, cfg.model.num_classes, background_weight=bg_weight, device=device
+            )
+            class_names = list(cfg.classes)
+            weight_by_name = {
+                name: round(class_weights[i + 1].item(), 4)
+                for i, name in enumerate(class_names)
+            }
+            log.info(f"Class-balanced loss: annotation counts by id = {counts}")
+            log.info(f"Class-balanced loss: weights by class = {weight_by_name}")
+            apply_weighted_fastrcnn_loss(class_weights)
+
+            if cfg.training.get('use_weighted_sampler', False):
+                log.warning(
+                    "Both use_weighted_sampler and class_balanced_loss are enabled. "
+                    "These stack (rebalancing presence AND gradient magnitude) and can "
+                    "over-correct the minority class — watch per-class AP for overshoot."
+                )
+
     # Create Model EMA if enabled
     model_ema = None
     if cfg.training.get('use_ema', False):
