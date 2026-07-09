@@ -13,7 +13,7 @@ import torch
 import torch.multiprocessing as mp
 from omegaconf import DictConfig, OmegaConf
 from pycocotools.coco import COCO
-from torch.utils.data import DataLoader, Subset, random_split
+from torch.utils.data import DataLoader, Subset, WeightedRandomSampler, random_split
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -404,6 +404,71 @@ def prepare_data(cfg: DictConfig):
     return train_dataset, val_dataset
 
 
+def build_class_balanced_weights(train_dataset, background_weight='mean'):
+    """Compute per-sample weights for a WeightedRandomSampler that up-samples
+    images containing rare classes.
+
+    Detection images can hold multiple classes, so there's no perfect per-image
+    balance. Heuristic: weight each image by the inverse image-frequency of the
+    *rarest* class it contains, so any image with a rare class gets boosted.
+
+    Handles both dataset shapes: a torch Subset (auto-split) or a bare
+    ViamDataset (separate val_dir). Weights are aligned to DataLoader indexing
+    order (0..len-1), not the underlying dataset's indices.
+
+    Args:
+        train_dataset: The final train dataset passed to the DataLoader.
+        background_weight: Weight for images with no boxes. 'mean' uses the mean
+            of the non-empty image weights; a float sets it explicitly.
+
+    Returns:
+        torch.DoubleTensor of length len(train_dataset), aligned to DataLoader
+        indexing order.
+    """
+    # Resolve the underlying ViamDataset + the indices the DataLoader will walk.
+    if isinstance(train_dataset, Subset):
+        base = train_dataset.dataset          # ViamDataset (clone)
+        order = list(train_dataset.indices)   # DataLoader idx i -> base.samples[order[i]]
+    else:
+        base = train_dataset                  # ViamDataset
+        order = list(range(len(base.samples)))
+
+    # Pass 1: image-level class frequencies over the TRAIN split only.
+    class_img_count = defaultdict(int)
+    per_image_labels = []
+    for base_idx in order:
+        labels = {b.get('annotation_label') for b in base.samples[base_idx]['boxes']}
+        labels.discard(None)
+        per_image_labels.append(labels)
+        for c in labels:
+            class_img_count[c] += 1
+
+    # Inverse-frequency weight per class (rarer class -> higher weight).
+    class_weight = {c: 1.0 / n for c, n in class_img_count.items() if n > 0}
+
+    # Pass 2: per-image weight = max class weight among present classes.
+    weights = []
+    for labels in per_image_labels:
+        if labels:
+            weights.append(max(class_weight[c] for c in labels))
+        else:
+            weights.append(None)  # empty/background image, fill in below
+
+    non_empty = [w for w in weights if w is not None]
+    if background_weight == 'mean':
+        bg = sum(non_empty) / len(non_empty) if non_empty else 1.0
+    else:
+        bg = float(background_weight)
+    weights = [bg if w is None else w for w in weights]
+
+    log.info(
+        f"WeightedRandomSampler: {len(class_img_count)} classes, "
+        f"image counts={dict(class_img_count)}, "
+        f"weight range=[{min(weights):.3g}, {max(weights):.3g}], bg_weight={bg:.3g}"
+    )
+    return torch.as_tensor(weights, dtype=torch.double)
+
+
 def create_coco_gt(val_dataset, output_path, classes):
     """Create COCO ground truth JSON from the validation dataset.
 
@@ -561,10 +626,23 @@ def main(cfg: DictConfig):
     num_workers = cfg.training.num_workers
     pin_memory = cfg.training.pin_memory and device.type == 'cuda'
     
+    # Optional class-balanced sampling to counteract class imbalance.
+    # sampler and shuffle are mutually exclusive; only the train loader uses it.
+    train_sampler = None
+    if cfg.training.get('use_weighted_sampler', False):
+        sample_weights = build_class_balanced_weights(train_dataset)
+        train_sampler = WeightedRandomSampler(
+            weights=sample_weights,
+            num_samples=len(sample_weights),   # one epoch = same # of images, resampled
+            replacement=True,                  # required for up-sampling rare classes
+        )
+        log.info("Using class-balanced WeightedRandomSampler for training")
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg.training.batch_size,
-        shuffle=True,
+        shuffle=(train_sampler is None),       # mutually exclusive with sampler
+        sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=pin_memory,
         collate_fn=GPUCollate(device),
@@ -735,12 +813,26 @@ def main(cfg: DictConfig):
         writer.add_scalar('COCO/AP50', coco_metrics['AP50'], epoch)
         writer.add_scalar('COCO/AP75', coco_metrics['AP75'], epoch)
         writer.add_scalar('COCO/AR100', coco_metrics['AR100'], epoch)
-        
+
+        # Per-class AP — exposes class-imbalance gaps hidden by the aggregate AP.
+        # NaN (class absent from val) is skipped so TensorBoard curves stay clean.
+        per_class_ap = coco_metrics.get('per_class_AP', {})
+        for cls_name, cls_vals in per_class_ap.items():
+            if not math.isnan(cls_vals['AP']):
+                writer.add_scalar(f'COCO_per_class_AP/{cls_name}', cls_vals['AP'], epoch)
+            if not math.isnan(cls_vals['AP50']):
+                writer.add_scalar(f'COCO_per_class_AP50/{cls_name}', cls_vals['AP50'], epoch)
+
         writer.add_scalar('Learning_rate', optimizer.param_groups[0]['lr'], epoch)
-        
+
         log.info(f'Epoch {epoch+1}/{cfg.training.num_epochs}:')
         log.info(f'  Train Loss: {train_metrics["loss"]:.4f} | Val Loss: {val_loss:.4f}')
         log.info(f'  AP: {coco_metrics["AP"]:.4f} | AP50: {coco_metrics["AP50"]:.4f} | AP75: {coco_metrics["AP75"]:.4f}')
+        if per_class_ap:
+            per_class_str = ' | '.join(
+                f'{name}={vals["AP"]:.3f}' for name, vals in sorted(per_class_ap.items())
+            )
+            log.info(f'  Per-class AP: {per_class_str}')
         log.info(f'  LR: {optimizer.param_groups[0]["lr"]:.6f}')
         
         # PyTorch reference: Step scheduler per-epoch (after validation)

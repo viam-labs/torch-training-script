@@ -101,6 +101,41 @@ def collect_predictions(
     return coco_results
 
 
+def _per_class_ap(coco_eval: COCOeval, coco_gt: COCO) -> Dict[str, Dict[str, float]]:
+    """Extract per-class AP from an accumulated COCOeval.
+
+    Reads the precision tensor ``coco_eval.eval['precision']`` of shape
+    ``[T, R, K, A, M]`` where T=IoU thresholds, R=recall points, K=categories,
+    A=area ranges (index 0 == 'all'), M=maxDets (index -1 == 100). A value of
+    -1 means "no data" and is excluded from the mean.
+
+    Returns:
+        Dict keyed by category name -> {'AP': AP@0.50:0.95, 'AP50': AP@0.50}.
+        A class with no ground truth in the eval set yields NaN.
+    """
+    precisions = coco_eval.eval['precision']  # [T, R, K, A, M]
+    cat_ids = coco_eval.params.catIds
+    cat_id_to_name = {c['id']: c['name'] for c in coco_gt.dataset['categories']}
+
+    per_class: Dict[str, Dict[str, float]] = {}
+    for idx, cat_id in enumerate(cat_ids):
+        name = cat_id_to_name.get(cat_id, str(cat_id))
+
+        # AP @ IoU=0.50:0.95, area=all, maxDet=100
+        p_all = precisions[:, :, idx, 0, -1]
+        p_all = p_all[p_all > -1]
+        ap = float(p_all.mean()) if p_all.size else float('nan')
+
+        # AP @ IoU=0.50 (first IoU threshold), area=all, maxDet=100
+        p_50 = precisions[0, :, idx, 0, -1]
+        p_50 = p_50[p_50 > -1]
+        ap50 = float(p_50.mean()) if p_50.size else float('nan')
+
+        per_class[name] = {'AP': ap, 'AP50': ap50}
+
+    return per_class
+
+
 def evaluate_coco_predictions(
     predictions: List[Dict],
     coco_gt: COCO,
@@ -136,6 +171,7 @@ def evaluate_coco_predictions(
             'ARs': 0.0,
             'ARm': 0.0,
             'ARl': 0.0,
+            'per_class_AP': {},
         }
     
     # Debug: Check prediction details
@@ -172,7 +208,15 @@ def evaluate_coco_predictions(
         log.info("COCO Evaluation Results:")
     with redirect_stdout(io.StringIO()):
         coco_eval.summarize()
-    
+
+    # Per-class AP (surfaces class-imbalance gaps hidden by the aggregate AP)
+    per_class_ap = _per_class_ap(coco_eval, coco_gt)
+    if verbose and per_class_ap:
+        log.info("Per-class AP (IoU=0.50:0.95 | AP50):")
+        for name in sorted(per_class_ap):
+            vals = per_class_ap[name]
+            log.info(f"  {name}: AP={vals['AP']:.4f} | AP50={vals['AP50']:.4f}")
+
     # Return metrics as dict
     return {
         'AP': coco_eval.stats[0],      # AP @ IoU=0.50:0.95
@@ -187,6 +231,7 @@ def evaluate_coco_predictions(
         'ARs': coco_eval.stats[9],     # AR for small objects
         'ARm': coco_eval.stats[10],    # AR for medium objects
         'ARl': coco_eval.stats[11],    # AR for large objects
+        'per_class_AP': per_class_ap,  # {name: {'AP', 'AP50'}}
     }
 
 
