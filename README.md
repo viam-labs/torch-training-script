@@ -785,7 +785,11 @@ python src/eval.py dataset_dir=./my_dataset run_dir=outputs/YYYY-MM-DD/HH-MM-SS
 bash convert_model.sh outputs/YYYY-MM-DD/HH-MM-SS --dataset-dir ./my_dataset
 ```
 
-Output: `outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/` containing `model.onnx` and `labels.txt`.
+Output: `outputs/YYYY-MM-DD/HH-MM-SS/onnx_model/` containing `model.onnx`, `labels.txt`, `config.yaml` (the training config, copied verbatim for reproducibility), and `conversion_summary.txt`. The directory is rebuilt from scratch on every run — everything in it ships to the registry in Step 7.
+
+Add `--evaluate-converted-model` to also evaluate the exported ONNX model on the test dataset. The evaluation output lands outside the package (in `eval_<dataset>_model_onnx/` inside the run dir), and if PyTorch evaluation results are available, a `comparison.json` (PyTorch vs ONNX metrics) is included in the package.
+
+Add `--pytorch-metrics PATH` to also ship a PyTorch evaluation metrics file in the package (as `pytorch_metrics.json`) — this is how consumers of your model see its accuracy without running their own evaluation. The evaluation also used in Step 3 produces this file: `python src/eval.py` writes it to `run_dir/eval_<dataset>_<checkpoint>_pth/<model>_metrics.json` (e.g. `faster_rcnn_metrics.json`). When provided, this file is also used as the PyTorch side of the comparison, as long as it was evaluated on the same dataset as `--dataset-dir` — otherwise the comparison falls back to a prior eval on that dataset, or is skipped.
 
 ### Step 5: Build the vision service
 
