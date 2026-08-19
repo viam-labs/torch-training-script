@@ -23,13 +23,13 @@ EOF
 chmod +x "$tmp/fake_viam"
 
 # --- happy path: all files present, stub CLI receives the right flags ------
-if make upload RUN_DIR="$tmp/run" VERSION=0.0-test ORG_ID=fake-org VIAM="$tmp/fake_viam" > "$tmp/out" 2>&1; then
+if make upload RUN_DIR="$tmp/run" VERSION=0.0-test ORG_ID=fake-org MODEL_NAME=test-model VIAM="$tmp/fake_viam" > "$tmp/out" 2>&1; then
     pass "upload target exits 0"
 else
     fail "upload target errored: $(cat "$tmp/out")"
 fi
 
-for flag in "--org-id=fake-org" "--name=raw-data-detector" "--version=0.0-test" \
+for flag in "--org-id=fake-org" "--name=test-model" "--version=0.0-test" \
             "--type=ml_model" "--model-type=object_detection" "--model-framework=onnx"; do
     grep -q -- "$flag" "$tmp/args" 2>/dev/null && pass "passes $flag" || fail "missing $flag in viam args"
 done
@@ -37,7 +37,7 @@ done
 test -f "$tmp/run/onnx_model/archive.tar.gz" && pass "archive created" || fail "archive.tar.gz not created"
 tar -tzf "$tmp/run/onnx_model/archive.tar.gz" | grep -q model.onnx && pass "archive contains model.onnx" \
     || fail "model.onnx not in archive"
-grep -q "Uploaded raw-data-detector:0.0-test" "$tmp/out" && pass "prints confirmation" || fail "no confirmation line"
+grep -q "Uploaded test-model:0.0-test" "$tmp/out" && pass "prints confirmation" || fail "no confirmation line"
 
 # --- missing package file: must refuse before invoking the CLI -------------
 rm "$tmp/run/onnx_model/labels.txt" "$tmp/args"
