@@ -849,15 +849,35 @@ For production, upload your model to the registry so any machine in your org can
 
 **7a. Upload the model package:**
 
+Use the provided `Makefile` to package and upload to the registry in one step:
+
+```bash
+make upload RUN_DIR=outputs/YYYY-MM-DD/HH-MM-SS VERSION=<version>
+```
+
+This verifies that `RUN_DIR/onnx_model/` contains all required package files (`model.onnx`, `labels.txt`, `config.yaml`, `pytorch_metrics.json`), bundles them into `archive.tar.gz`, and uploads it to the registry with `viam packages upload`. If any files are missing, re-run `convert_model.sh` with the `--pytorch-metrics` flag (see Step 4).
+
+Variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `RUN_DIR` | yes | Training output directory containing `onnx_model/` |
+| `VERSION` | yes | Package version to publish (e.g. `0.1.2`) |
+| `ORG_ID` | yes | Your Viam organization ID — set it in a `.env` file at the repo root (`ORG_ID=<org-id>`) |
+| `MODEL_NAME` | no | Package name in the registry (default: `omni-detector`) |
+| `VIAM` | no | Path to the `viam` CLI binary (default: `viam`) |
+
+Equivalent manual upload, if you'd rather not use the Makefile:
+
 ```bash
 viam packages upload \
     --org-id=<org-id> \
     --name=<package-name> \
     --version=<version> \
     --type=ml_model \
-    --upload=<path-to-onnx_model.tar.gz> \
-    --model-framework=<framework> \
-    --model-type=<model-type>
+    --model-type=object_detection \
+    --path=<path-to-onnx_model-archive.tar.gz> \
+    --model-framework=onnx
 ```
 
 **7b. Add the package to your machine config:**
@@ -927,6 +947,7 @@ torch-training-script/
 │       ├── onnx_vision_service.py # Vision service implementation
 │       ├── utils.py              # Image decoding utilities
 │       └── build.sh              # Build script (PyInstaller)
+├── Makefile                      # `make upload`: package + upload model to Viam registry
 ├── convert_model.sh              # ONNX conversion script (shell wrapper)
 ├── convert_to_onnx.py            # ONNX conversion (Python, all architectures)
 ├── quantize_onnx.py              # Static INT8 ONNX quantization
