@@ -855,7 +855,7 @@ Use the provided `Makefile` to package and upload to the registry in one step:
 make upload RUN_DIR=outputs/YYYY-MM-DD/HH-MM-SS VERSION=<version>
 ```
 
-This verifies that `RUN_DIR/onnx_model/` contains all required package files (`model.onnx`, `labels.txt`, `config.yaml`, `pytorch_metrics.json`), bundles them into `archive.tar.gz`, and uploads it to the registry with `viam packages upload`. If any files are missing, re-run `convert_model.sh` with the `--pytorch-metrics` flag (see Step 4).
+This verifies that `RUN_DIR/onnx_model/` contains all required package files (`model.onnx`, `labels.txt`, `config.yaml`, `pytorch_metrics.json`), bundles them into `archive.tar.gz`, and uploads it to the registry with `viam packages upload`. If any files are missing, re-run: `bash convert_model.sh <run_dir> --dataset-dir <dataset> --pytorch-metrics <metrics.json>` (see Step 4).
 
 Variables:
 
@@ -864,7 +864,7 @@ Variables:
 | `RUN_DIR` | yes | Training output directory containing `onnx_model/` |
 | `VERSION` | yes | Package version to publish (e.g. `0.1.2`) |
 | `ORG_ID` | yes | Your Viam organization ID — set it in a `.env` file at the repo root (`ORG_ID=<org-id>`) |
-| `MODEL_NAME` | no | Package name in the registry (default: `omni-detector`) |
+| `MODEL_NAME` | yes | Package name in the registry — set it in `.env` (e.g. `MODEL_NAME=omni-detector`) |
 | `VIAM` | no | Path to the `viam` CLI binary (default: `viam`) |
 
 Equivalent manual upload, if you'd rather not use the Makefile:

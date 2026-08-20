@@ -41,7 +41,7 @@ grep -q "Uploaded test-model:0.0-test" "$tmp/out" && pass "prints confirmation" 
 
 # --- missing package file: must refuse before invoking the CLI -------------
 rm "$tmp/run/onnx_model/labels.txt" "$tmp/args"
-if make upload RUN_DIR="$tmp/run" VERSION=0.0-test ORG_ID=fake-org VIAM="$tmp/fake_viam" > "$tmp/out" 2>&1; then
+if make upload RUN_DIR="$tmp/run" VERSION=0.0-test ORG_ID=fake-org MODEL_NAME=test-model VIAM="$tmp/fake_viam" > "$tmp/out" 2>&1; then
     fail "upload succeeded despite missing labels.txt"
 else
     pass "refuses upload when labels.txt is missing"
@@ -51,7 +51,7 @@ test -f "$tmp/args" && fail "viam CLI was invoked despite missing file" || pass 
 # --- everything present except pytorch_metrics.json ------------------------
 touch "$tmp/run/onnx_model/labels.txt"
 rm "$tmp/run/onnx_model/pytorch_metrics.json"
-if make upload RUN_DIR="$tmp/run" VERSION=0.0-test ORG_ID=fake-org VIAM="$tmp/fake_viam" > "$tmp/out" 2>&1; then
+if make upload RUN_DIR="$tmp/run" VERSION=0.0-test ORG_ID=fake-org MODEL_NAME=test-model VIAM="$tmp/fake_viam" > "$tmp/out" 2>&1; then
     fail "upload succeeded despite missing pytorch_metrics.json"
 else
     pass "refuses upload when pytorch_metrics.json is missing"
@@ -66,6 +66,8 @@ make upload VERSION=x ORG_ID=fake-org VIAM="$tmp/fake_viam" > /dev/null 2>&1 \
     && fail "succeeded without RUN_DIR" || pass "requires RUN_DIR"
 make upload RUN_DIR="$tmp/run" ORG_ID=fake-org VIAM="$tmp/fake_viam" > /dev/null 2>&1 \
     && fail "succeeded without VERSION" || pass "requires VERSION"
+make upload RUN_DIR="$tmp/run" VERSION=x ORG_ID=fake-org MODEL_NAME= VIAM="$tmp/fake_viam" > /dev/null 2>&1 \
+    && fail "succeeded without MODEL_NAME" || pass "requires MODEL_NAME"
 
 echo
 if [ "$fails" -eq 0 ]; then echo "all tests passed"; else echo "$fails test(s) failed"; exit 1; fi
