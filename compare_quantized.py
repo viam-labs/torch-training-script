@@ -125,13 +125,13 @@ def main():
 
     if orig_size_mb and quant_size_mb:
         reduction = (1 - quant_size_mb / orig_size_mb) * 100
-        print(f"\nModel Size:")
+        print("\nModel Size:")
         print(f"  Original:  {orig_size_mb:.1f} MB")
         print(f"  Quantized: {quant_size_mb:.1f} MB")
         print(f"  Reduction: {reduction:.1f}%")
 
     # COCO metrics comparison
-    print(f"\nCOCO Metrics:")
+    print("\nCOCO Metrics:")
     print(
         f"  {'Metric':<8s}  {'Original':>10s}  {'Quantized':>10s}  {'Diff':>10s}  {'Diff%':>8s}"
     )

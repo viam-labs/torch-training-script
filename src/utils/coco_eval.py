@@ -7,7 +7,7 @@ import io
 import logging
 from collections import defaultdict
 from contextlib import redirect_stdout
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 import torch

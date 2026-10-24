@@ -28,8 +28,8 @@ from utils.coco_eval import (
     evaluate_coco_predictions,
 )
 from utils.transforms import (
-    build_transforms,
     attach_dataset_transform,
+    build_transforms,
     detection_collate,
 )
 

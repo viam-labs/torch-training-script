@@ -18,8 +18,6 @@ from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
-from PIL import Image
-
 from onnxruntime.quantization import (
     CalibrationDataReader,
     CalibrationMethod,
@@ -28,6 +26,7 @@ from onnxruntime.quantization import (
     quantize_static,
 )
 from onnxruntime.quantization.shape_inference import quant_pre_process
+from PIL import Image
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)

@@ -6,7 +6,6 @@ Based on PyTorch's reference detection implementation.
 import math
 from typing import List
 
-import torch
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 

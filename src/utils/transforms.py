@@ -8,9 +8,9 @@ import math
 import random
 from typing import Dict, List, Optional, Tuple
 
-import torch
 import cv2
 import numpy as np
+import torch
 import torchvision.transforms.functional as F
 from omegaconf import DictConfig
 
