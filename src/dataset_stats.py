@@ -39,7 +39,10 @@ def load_dataset(dataset_dir: Path) -> list[dict]:
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError as e:
-                print(f"WARN: {jsonl_path}:{line_num} malformed JSON: {e}", file=sys.stderr)
+                print(
+                    f"WARN: {jsonl_path}:{line_num} malformed JSON: {e}",
+                    file=sys.stderr,
+                )
                 continue
 
             binary_data_id = entry.get("binary_data_id") or entry.get("binaryDataId")
@@ -58,13 +61,15 @@ def load_dataset(dataset_dir: Path) -> list[dict]:
                 if bbox.get("annotation_label")
             ]
 
-            out.append({
-                "binary_data_id": binary_data_id,
-                "image_path": image_path,
-                "labels": labels,
-                "sequence_id": sequence_id,
-                "source_dataset": str(dataset_dir),
-            })
+            out.append(
+                {
+                    "binary_data_id": binary_data_id,
+                    "image_path": image_path,
+                    "labels": labels,
+                    "sequence_id": sequence_id,
+                    "source_dataset": str(dataset_dir),
+                }
+            )
     return out
 
 
@@ -183,7 +188,9 @@ def print_table(title: str, stats: dict[str, dict], show_split: bool = True) -> 
     name_w = max(len(headers[0]), max(len(name) for name, _ in rows))
     num_w = {h: max(len(h), max(len(str(s[h])) for _, s in rows)) for h in headers[1:]}
 
-    header_line = f"{headers[0]:<{name_w}}  " + "  ".join(f"{h:>{num_w[h]}}" for h in headers[1:])
+    header_line = f"{headers[0]:<{name_w}}  " + "  ".join(
+        f"{h:>{num_w[h]}}" for h in headers[1:]
+    )
     sep = "-" * len(header_line)
 
     print(f"\n{title}")
@@ -191,22 +198,45 @@ def print_table(title: str, stats: dict[str, dict], show_split: bool = True) -> 
     print(header_line)
     print(sep)
     for name, s in rows:
-        row = f"{name:<{name_w}}  " + "  ".join(f"{s[h]:>{num_w[h]}}" for h in headers[1:])
+        row = f"{name:<{name_w}}  " + "  ".join(
+            f"{s[h]:>{num_w[h]}}" for h in headers[1:]
+        )
         print(row)
     print(sep)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("dataset_dirs", nargs="+", type=Path, help="One or more directories containing dataset.jsonl")
-    parser.add_argument("--others", action="store_true",
-                        help=f"Show only labels that DON'T match prefix '{CLASS_PREFIX}' (sanity check).")
-    parser.add_argument("--test-set", action="store_true",
-                        help="Treat input as a held-out test set: skip the train/val sequence projection.")
-    parser.add_argument("--val-split", type=float, default=0.2,
-                        help="Fraction of images projected into val split (default: 0.2, matches train.yaml).")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Seed for sequence-aware split projection (default: 42, matches train.yaml).")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "dataset_dirs",
+        nargs="+",
+        type=Path,
+        help="One or more directories containing dataset.jsonl",
+    )
+    parser.add_argument(
+        "--others",
+        action="store_true",
+        help=f"Show only labels that DON'T match prefix '{CLASS_PREFIX}' (sanity check).",
+    )
+    parser.add_argument(
+        "--test-set",
+        action="store_true",
+        help="Treat input as a held-out test set: skip the train/val sequence projection.",
+    )
+    parser.add_argument(
+        "--val-split",
+        type=float,
+        default=0.2,
+        help="Fraction of images projected into val split (default: 0.2, matches train.yaml).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Seed for sequence-aware split projection (default: 42, matches train.yaml).",
+    )
     args = parser.parse_args()
 
     all_images: list[dict] = []
@@ -217,7 +247,9 @@ def main() -> None:
 
     images = dedupe(all_images)
     n_with_seq = sum(1 for i in images if i["sequence_id"] is not None)
-    n_unique_seqs = len({i["sequence_id"] for i in images if i["sequence_id"] is not None})
+    n_unique_seqs = len(
+        {i["sequence_id"] for i in images if i["sequence_id"] is not None}
+    )
     print(
         f"\nTotal: {len(images)} unique images, "
         f"{n_with_seq} with sequence_id ({n_unique_seqs} unique sequences), "
@@ -235,17 +267,25 @@ def main() -> None:
                 f"{len(train_seqs)} train sequences, {len(val_seqs)} val sequences."
             )
         else:
-            print("No sequence_ids present — train/val projection skipped (all images would land in train).")
+            print(
+                "No sequence_ids present — train/val projection skipped (all images would land in train)."
+            )
 
     stats = compute_class_stats(images, train_seqs, val_seqs)
     show_split = not args.test_set
 
     if args.others:
         others = {k: v for k, v in stats.items() if not k.startswith(CLASS_PREFIX)}
-        print_table(f"Other bbox labels (not matching prefix '{CLASS_PREFIX}')", others, show_split=show_split)
+        print_table(
+            f"Other bbox labels (not matching prefix '{CLASS_PREFIX}')",
+            others,
+            show_split=show_split,
+        )
     else:
         matched = {k: v for k, v in stats.items() if k.startswith(CLASS_PREFIX)}
-        print_table(f"Classes (prefix '{CLASS_PREFIX}')", matched, show_split=show_split)
+        print_table(
+            f"Classes (prefix '{CLASS_PREFIX}')", matched, show_split=show_split
+        )
 
 
 if __name__ == "__main__":

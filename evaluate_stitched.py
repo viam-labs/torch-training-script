@@ -19,6 +19,7 @@ It reports two metric sets:
   (treated as pseudo-GT after confidence filtering). Whether stitching itself
   costs accuracy relative to how the model behaves on each view alone.
 """
+
 import argparse
 import json
 import logging
@@ -326,7 +327,13 @@ def draw_visualization(
     for ann in gt_annotations:
         x, y, w, h = ann["bbox"]
         rect = patches.Rectangle(
-            (x, y), w, h, linewidth=2, edgecolor="lime", facecolor="none", linestyle="--"
+            (x, y),
+            w,
+            h,
+            linewidth=2,
+            edgecolor="lime",
+            facecolor="none",
+            linestyle="--",
         )
         ax.add_patch(rect)
         name = cat_id_to_name.get(ann["category_id"], str(ann["category_id"]))
@@ -342,7 +349,11 @@ def draw_visualization(
         ax.add_patch(rect)
         name = cat_id_to_name.get(pred["category_id"], str(pred["category_id"]))
         ax.text(
-            x, y + h + 12, f"Stitched:{name} {pred['score']:.2f}", color="red", fontsize=7
+            x,
+            y + h + 12,
+            f"Stitched:{name} {pred['score']:.2f}",
+            color="red",
+            fontsize=7,
         )
 
     for pred in per_view_preds:
@@ -350,7 +361,13 @@ def draw_visualization(
             continue
         x, y, w, h = pred["bbox"]
         rect = patches.Rectangle(
-            (x, y), w, h, linewidth=1, edgecolor="orange", facecolor="none", linestyle=":"
+            (x, y),
+            w,
+            h,
+            linewidth=1,
+            edgecolor="orange",
+            facecolor="none",
+            linestyle=":",
         )
         ax.add_patch(rect)
         name = cat_id_to_name.get(pred["category_id"], str(pred["category_id"]))
@@ -380,14 +397,18 @@ def _log_pr(label: str, pr_results: Dict) -> None:
         f"  {'Class':<{col_w}s}  {'Prec':>6s}  {'Rec':>6s}  {'F1':>6s}  "
         f"{'TP':>5s}  {'FP':>5s}  {'FN':>5s}"
     )
-    log.info(f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
+    log.info(
+        f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}"
+    )
     for name in class_names:
         c = pr_results["per_class"][name]
         log.info(
             f"  {name:<{col_w}s}  {c['precision']:6.3f}  {c['recall']:6.3f}  "
             f"{c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}"
         )
-    log.info(f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
+    log.info(
+        f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}"
+    )
     log.info(
         f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  "
         f"{ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}"
@@ -406,7 +427,9 @@ def main() -> None:
         "--labels", required=True, help="Path to labels.txt (one class per line)"
     )
     parser.add_argument(
-        "--test-data", required=True, help="Path to dataset directory (contains dataset.jsonl, data/)"
+        "--test-data",
+        required=True,
+        help="Path to dataset directory (contains dataset.jsonl, data/)",
     )
     parser.add_argument("--output-dir", required=True, help="Directory for outputs")
     parser.add_argument(
@@ -442,7 +465,9 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    classes = [l.strip() for l in Path(args.labels).read_text().splitlines() if l.strip()]
+    classes = [
+        l.strip() for l in Path(args.labels).read_text().splitlines() if l.strip()
+    ]
     log.info(f"Classes (category_id 1..N, in order): {classes}")
     cat_id_to_name = {idx + 1: name for idx, name in enumerate(classes)}
 

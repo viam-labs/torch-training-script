@@ -162,9 +162,7 @@ class OmniOnnxInference:
         # [H, W, C] uint8 -> [C, H, W] uint8 -> [1, C, H, W] uint8
         img_np = np.array(img_resized, dtype=np.uint8)
         if self.background_strip_dist and self.background_strip_dist > 0:
-            img_np = self._background_strip_np(
-                img_np, dist=self.background_strip_dist
-            )
+            img_np = self._background_strip_np(img_np, dist=self.background_strip_dist)
         img_chw = img_np.transpose(2, 0, 1)
         return np.expand_dims(img_chw, axis=0)
 
@@ -224,9 +222,7 @@ class OmniOnnxInference:
         return detections
 
     @staticmethod
-    def _background_strip_np(
-        img_hwc_u8: np.ndarray, dist: float = 150
-    ) -> np.ndarray:
+    def _background_strip_np(img_hwc_u8: np.ndarray, dist: float = 150) -> np.ndarray:
         """Strip pixels within Euclidean distance ``dist`` of the k-means background.
 
         This is the canonical (numpy/cv2) background strip — a numpy->numpy port
@@ -251,14 +247,8 @@ class OmniOnnxInference:
         # Mirror `get_background_from_img_tensor()`:
         # - reshape image as 100x100 float32 in [0, 1]
         # - run cv2.kmeans with k=5 and count the most common label
-        resized = cv2.resize(
-            img_hwc_u8, (100, 100), interpolation=cv2.INTER_LINEAR
-        )
-        data = (
-            (resized.astype(np.float32) / 255.0)
-            .reshape((-1, 3))
-            .astype(np.float32)
-        )
+        resized = cv2.resize(img_hwc_u8, (100, 100), interpolation=cv2.INTER_LINEAR)
+        data = (resized.astype(np.float32) / 255.0).reshape((-1, 3)).astype(np.float32)
 
         criteria = (
             cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
@@ -269,9 +259,7 @@ class OmniOnnxInference:
             data, 5, None, criteria, 10, cv2.KMEANS_RANDOM_CENTERS
         )
         labels = labels.reshape(-1)
-        max_label = int(
-            np.bincount(labels, minlength=centers.shape[0]).argmax()
-        )
+        max_label = int(np.bincount(labels, minlength=centers.shape[0]).argmax())
         background_color_01 = centers[max_label]  # float32 in [0,1]
         bg_rgb_255 = background_color_01 * 255.0  # float32 in [0,255]
 

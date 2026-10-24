@@ -21,11 +21,21 @@ from models.fcos_detector import FCOSDetector
 from models.retinanet_detector import RetinaNetDetector
 from models.ssdlite_detector import SSDLiteDetector
 from utils.coco_converter import jsonl_to_coco
-from utils.coco_eval import compute_det_curves, compute_precision_recall, convert_to_xywh, evaluate_coco_predictions
-from utils.transforms import build_transforms, attach_dataset_transform, detection_collate
+from utils.coco_eval import (
+    compute_det_curves,
+    compute_precision_recall,
+    convert_to_xywh,
+    evaluate_coco_predictions,
+)
+from utils.transforms import (
+    build_transforms,
+    attach_dataset_transform,
+    detection_collate,
+)
 
 try:
     import onnxruntime as ort
+
     ONNX_AVAILABLE = True
 except ImportError:
     ONNX_AVAILABLE = False
@@ -35,56 +45,64 @@ log = logging.getLogger(__name__)
 
 class ONNXModelWrapper:
     """Wrapper to make ONNX model behave like PyTorch model for evaluation.
-    
+
     Expects float32 input in [0, 1] range from the dataloader (no normalization).
     Converts to uint8 [0, 255] for the ONNX model which handles normalization internally.
-    
+
     Note: ONNX models are typically exported with batch_size=1, so we process
     images one at a time to handle variable batch sizes from the DataLoader.
     """
-    
-    def __init__(self, onnx_path: str, device: str = 'cpu'):
+
+    def __init__(self, onnx_path: str, device: str = "cpu"):
         if not ONNX_AVAILABLE:
-            raise ImportError("onnxruntime not installed. Install with: pip install onnxruntime")
-        
+            raise ImportError(
+                "onnxruntime not installed. Install with: pip install onnxruntime"
+            )
+
         # Set execution providers based on device
-        if device == 'cuda':
-            providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        if device == "cuda":
+            providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
         else:
-            providers = ['CPUExecutionProvider']
-        
+            providers = ["CPUExecutionProvider"]
+
         self.session = ort.InferenceSession(onnx_path, providers=providers)
         self.device = device
-        
+
         # Get input shape info
         input_info = self.session.get_inputs()[0]
         self.input_name = input_info.name
         input_shape = input_info.shape
-        
+
         log.info(f"Loaded ONNX model from: {onnx_path}")
         log.info(f"ONNX Runtime providers: {self.session.get_providers()}")
         log.info(f"ONNX input name: {self.input_name}, shape: {input_shape}")
-        log.info("ONNX model expects uint8 input [0, 255] (normalization handled by model's GeneralizedRCNNTransform)")
-        
+        log.info(
+            "ONNX model expects uint8 input [0, 255] (normalization handled by model's GeneralizedRCNNTransform)"
+        )
+
         # Check if model expects fixed batch size
-        if len(input_shape) > 0 and isinstance(input_shape[0], int) and input_shape[0] > 0:
+        if (
+            len(input_shape) > 0
+            and isinstance(input_shape[0], int)
+            and input_shape[0] > 0
+        ):
             self.expected_batch_size = input_shape[0]
             log.info(f"ONNX model expects fixed batch size: {self.expected_batch_size}")
         else:
             self.expected_batch_size = None
             log.info("ONNX model supports variable batch size")
-    
+
     def eval(self):
         """No-op for compatibility with PyTorch model interface."""
         return self
-    
+
     def __call__(self, images):
         """
         Run inference on images.
-        
+
         Args:
             images: List of torch tensors [C, H, W] OR batched tensor [B, C, H, W] in range [0, 1]
-        
+
         Returns:
             List of dicts with keys: 'boxes', 'scores', 'labels'
         """
@@ -94,7 +112,7 @@ class ONNXModelWrapper:
         else:
             # Convert batched tensor to list
             image_list = [images[i] for i in range(images.shape[0])]
-        
+
         # Process each image individually (ONNX model expects batch_size=1)
         # This handles the case where DataLoader provides batches > 1
         results = []
@@ -104,16 +122,16 @@ class ONNXModelWrapper:
                 img_batch = img.unsqueeze(0)  # [1, C, H, W]
             else:
                 img_batch = img
-            
+
             # Dataloader provides float32 [0, 1] (no normalization).
             # Convert to uint8 [0, 255] for ONNX model.
             # The model's built-in GeneralizedRCNNTransform handles normalization.
             img_np = (img_batch.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
-            
+
             # Run ONNX inference (expects batch_size=1)
             outputs = self.session.run(None, {self.input_name: img_np})
             boxes, labels, scores = outputs
-            
+
             # Convert outputs to tensors
             # boxes: [1, N, 4] -> [N, 4]
             # labels: [1, N] -> [N]
@@ -124,37 +142,50 @@ class ONNXModelWrapper:
                 labels = labels[0]  # [N]
             if scores.ndim == 2 and scores.shape[0] == 1:
                 scores = scores[0]  # [N]
-            
+
             # Filter out invalid detections (scores > 0)
             valid_mask = scores > 0
-            
+
             boxes_tensor = torch.from_numpy(boxes[valid_mask]).float()
             scores_tensor = torch.from_numpy(scores[valid_mask]).float()
             labels_tensor = torch.from_numpy(labels[valid_mask]).float()
-            
-            results.append({
-                'boxes': boxes_tensor,
-                'scores': scores_tensor,
-                'labels': labels_tensor
-            })
-        
+
+            results.append(
+                {
+                    "boxes": boxes_tensor,
+                    "scores": scores_tensor,
+                    "labels": labels_tensor,
+                }
+            )
+
         return results
 
 
-def visualize_predictions(image, predictions, targets, cfg: DictConfig,
-                          id_to_label=None, title="", output_dir=None,
-                          filter_labels: set[str] | None = None,
-                          only_with_predictions: bool = False):
+def visualize_predictions(
+    image,
+    predictions,
+    targets,
+    cfg: DictConfig,
+    id_to_label=None,
+    title="",
+    output_dir=None,
+    filter_labels: set[str] | None = None,
+    only_with_predictions: bool = False,
+):
     def _label_name(label_id):
         if id_to_label is None:
             return str(int(label_id))
         return id_to_label.get(int(label_id), str(int(label_id)))
 
     if only_with_predictions:
-        has_pred = predictions is not None and len(predictions['boxes']) > 0 and any(
-            score > cfg.evaluation.confidence_threshold
-            and (not filter_labels or _label_name(label) in filter_labels)
-            for score, label in zip(predictions['scores'], predictions['labels'])
+        has_pred = (
+            predictions is not None
+            and len(predictions["boxes"]) > 0
+            and any(
+                score > cfg.evaluation.confidence_threshold
+                and (not filter_labels or _label_name(label) in filter_labels)
+                for score, label in zip(predictions["scores"], predictions["labels"])
+            )
         )
         if not has_pred:
             return
@@ -164,39 +195,52 @@ def visualize_predictions(image, predictions, targets, cfg: DictConfig,
     fig, ax = plt.subplots(1)
     ax.imshow(img_np)
 
-    if predictions is not None and len(predictions['boxes']) > 0:
-        for box, score, label in zip(predictions['boxes'], predictions['scores'], predictions['labels']):
+    if predictions is not None and len(predictions["boxes"]) > 0:
+        for box, score, label in zip(
+            predictions["boxes"], predictions["scores"], predictions["labels"]
+        ):
             if score <= cfg.evaluation.confidence_threshold:
                 continue
             if filter_labels and _label_name(label) not in filter_labels:
                 continue
             x1, y1, x2, y2 = box.cpu().numpy()
-            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1,
-                                     edgecolor='r', facecolor='none')
+            rect = patches.Rectangle(
+                (x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor="r", facecolor="none"
+            )
             ax.add_patch(rect)
-            ax.text(x1, y1-5, f'{_label_name(label)} {score:.2f}', color='red', fontsize=7)
+            ax.text(
+                x1, y1 - 5, f"{_label_name(label)} {score:.2f}", color="red", fontsize=7
+            )
 
-    if targets is not None and targets['boxes'].numel() > 0:
-        boxes = targets['boxes'].view(-1, 4)
-        labels = targets['labels'].view(-1)
+    if targets is not None and targets["boxes"].numel() > 0:
+        boxes = targets["boxes"].view(-1, 4)
+        labels = targets["labels"].view(-1)
         for box, label in zip(boxes, labels):
             if filter_labels and _label_name(label) not in filter_labels:
                 continue
             x1, y1, x2, y2 = box.cpu().numpy()
-            rect = patches.Rectangle((x1, y1), x2-x1, y2-y1, linewidth=1,
-                                     edgecolor='lime', facecolor='none', linestyle='--')
+            rect = patches.Rectangle(
+                (x1, y1),
+                x2 - x1,
+                y2 - y1,
+                linewidth=1,
+                edgecolor="lime",
+                facecolor="none",
+                linestyle="--",
+            )
             ax.add_patch(rect)
-            ax.text(x1, y2+12, _label_name(label), color='lime', fontsize=7)
+            ax.text(x1, y2 + 12, _label_name(label), color="lime", fontsize=7)
 
     plt.title(title)
-    plt.axis('off')
+    plt.axis("off")
 
     if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         save_path = output_dir / f"{title.replace(' ', '_')}.png"
-        plt.savefig(save_path, dpi=200, bbox_inches='tight')
+        plt.savefig(save_path, dpi=200, bbox_inches="tight")
     plt.close()
+
 
 def plot_roc_curve(curve_data: dict, output_dir: Path, iou_threshold: float) -> Path:
     """Plot and save per-class and overall precision-recall curves."""
@@ -206,36 +250,43 @@ def plot_roc_curve(curve_data: dict, output_dir: Path, iou_threshold: float) -> 
     fig, ax = plt.subplots(figsize=(10, 8))
     colors = plt.cm.tab10.colors
 
-    class_names = sorted(curve_data['per_class'].keys())
+    class_names = sorted(curve_data["per_class"].keys())
     for idx, cls_name in enumerate(class_names):
-        cls = curve_data['per_class'][cls_name]
-        if not cls['recall']:
+        cls = curve_data["per_class"][cls_name]
+        if not cls["recall"]:
             continue
         color = colors[idx % len(colors)]
         ax.plot(
-            cls['recall'], cls['precision'],
-            color=color, linewidth=1.5,
+            cls["recall"],
+            cls["precision"],
+            color=color,
+            linewidth=1.5,
             label=f"{cls_name} (AP={cls['ap']:.3f}, n={cls['n_gt']})",
         )
 
-    overall = curve_data['overall']
-    if overall['recall']:
+    overall = curve_data["overall"]
+    if overall["recall"]:
         ax.plot(
-            overall['recall'], overall['precision'],
-            color='black', linewidth=2.5, linestyle='--',
+            overall["recall"],
+            overall["precision"],
+            color="black",
+            linewidth=2.5,
+            linestyle="--",
             label=f"Overall (AP={overall['ap']:.3f}, n={overall['n_gt']})",
         )
 
-    ax.set_xlabel('Recall', fontsize=13)
-    ax.set_ylabel('Precision', fontsize=13)
-    ax.set_title(f'Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})', fontsize=14)
+    ax.set_xlabel("Recall", fontsize=13)
+    ax.set_ylabel("Precision", fontsize=13)
+    ax.set_title(
+        f"Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})", fontsize=14
+    )
     ax.set_xlim([0.0, 1.02])
     ax.set_ylim([0.0, 1.02])
-    ax.legend(loc='lower left', fontsize=10)
+    ax.legend(loc="lower left", fontsize=10)
     ax.grid(True, alpha=0.3)
 
     save_path = output_dir / "precision_recall_curve.png"
-    fig.savefig(save_path, dpi=200, bbox_inches='tight')
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     log.info(f"Saved precision-recall curve to {save_path}")
     return save_path
@@ -245,33 +296,39 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     """
     Evaluate model on test set in a single pass: visualize samples, collect confidence
     statistics, and gather COCO predictions.
-    
+
     NOTE: This function collects ALL predictions (no confidence filtering) for COCO evaluation.
     The confidence threshold in cfg is only used for visualization.
     """
     model.eval()
-    
+
     visualize = cfg.evaluation.get("visualize", False)
     vis_dir = Path(cfg.logging.save_dir) / "visualizations" if visualize else None
 
-    classes = cfg.get('classes', None)
-    id_to_label = {idx + 1: label for idx, label in enumerate(sorted(classes))} if classes else None
+    classes = cfg.get("classes", None)
+    id_to_label = (
+        {idx + 1: label for idx, label in enumerate(sorted(classes))}
+        if classes
+        else None
+    )
 
     vis_labels = cfg.evaluation.get("visualize_labels", None)
     filter_labels = set(vis_labels) if vis_labels else None
     only_with_preds = cfg.evaluation.get("visualize_only_with_predictions", False)
-    
+
     # Track confidence score statistics for reporting
     all_scores = []
     total_boxes = 0
-    
+
     # Collect COCO predictions (single pass — no second inference loop)
     coco_results = []
-    
+
     with torch.no_grad():
-        for batch_idx, (images, targets) in enumerate(tqdm(data_loader, desc="Evaluating")):
+        for batch_idx, (images, targets) in enumerate(
+            tqdm(data_loader, desc="Evaluating")
+        ):
             outputs = model(images.to(device, non_blocking=True))
-            
+
             if visualize:
                 for i in range(len(images)):
                     visualize_predictions(
@@ -285,147 +342,172 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
                         filter_labels=filter_labels,
                         only_with_predictions=only_with_preds,
                     )
-            
+
             # Process each image's predictions for confidence stats and COCO collection
             for img_idx, (target, output) in enumerate(zip(targets, outputs)):
                 # Confidence statistics
-                if len(output['scores']) > 0:
-                    all_scores.extend(output['scores'].cpu().numpy())
-                    total_boxes += len(output['scores'])
-                
-                if len(output['boxes']) == 0:
+                if len(output["scores"]) > 0:
+                    all_scores.extend(output["scores"].cpu().numpy())
+                    total_boxes += len(output["scores"])
+
+                if len(output["boxes"]) == 0:
                     continue
-                
+
                 # Collect COCO predictions
-                image_id = target['image_id'].item()
-                boxes = output['boxes'].cpu()
-                scores = output['scores'].cpu()
-                labels = output['labels'].cpu()
-                
+                image_id = target["image_id"].item()
+                boxes = output["boxes"].cpu()
+                scores = output["scores"].cpu()
+                labels = output["labels"].cpu()
+
                 # Scale boxes back to original image dimensions
-                if 'orig_size' in target:
-                    orig_size = target['orig_size']
-                    orig_h = orig_size[0].item() if torch.is_tensor(orig_size[0]) else orig_size[0]
-                    orig_w = orig_size[1].item() if torch.is_tensor(orig_size[1]) else orig_size[1]
-                    
+                if "orig_size" in target:
+                    orig_size = target["orig_size"]
+                    orig_h = (
+                        orig_size[0].item()
+                        if torch.is_tensor(orig_size[0])
+                        else orig_size[0]
+                    )
+                    orig_w = (
+                        orig_size[1].item()
+                        if torch.is_tensor(orig_size[1])
+                        else orig_size[1]
+                    )
+
                     curr_h, curr_w = images[img_idx].shape[-2:]
                     scale_h = orig_h / curr_h
                     scale_w = orig_w / curr_w
                     boxes = boxes.clone()
                     boxes[:, [0, 2]] *= scale_w
                     boxes[:, [1, 3]] *= scale_h
-                
+
                 # Convert boxes from [x1,y1,x2,y2] to COCO format [x,y,w,h]
                 boxes = convert_to_xywh(boxes)
-                
+
                 for box, score, label in zip(boxes, scores, labels):
-                    coco_results.append({
-                        'image_id': image_id,
-                        'category_id': label.item(),
-                        'bbox': box.tolist(),
-                        'score': score.item(),
-                    })
-    
+                    coco_results.append(
+                        {
+                            "image_id": image_id,
+                            "category_id": label.item(),
+                            "bbox": box.tolist(),
+                            "score": score.item(),
+                        }
+                    )
+
     # Log confidence score statistics
     if total_boxes > 0:
         all_scores = np.array(all_scores)
         boxes_above_threshold = np.sum(all_scores > cfg.evaluation.confidence_threshold)
-        boxes_below_threshold = np.sum(all_scores <= cfg.evaluation.confidence_threshold)
-        
+        boxes_below_threshold = np.sum(
+            all_scores <= cfg.evaluation.confidence_threshold
+        )
+
         log.info(f"Total boxes detected: {total_boxes}")
-        log.info(f"Boxes with confidence > {cfg.evaluation.confidence_threshold}: {boxes_above_threshold} ({boxes_above_threshold/total_boxes*100:.1f}%)")
-        log.info(f"Boxes with confidence <= {cfg.evaluation.confidence_threshold}: {boxes_below_threshold} ({boxes_below_threshold/total_boxes*100:.1f}%)")
-        log.info(f"Score range: min={all_scores.min():.4f}, max={all_scores.max():.4f}, mean={all_scores.mean():.4f}")
+        log.info(
+            f"Boxes with confidence > {cfg.evaluation.confidence_threshold}: {boxes_above_threshold} ({boxes_above_threshold / total_boxes * 100:.1f}%)"
+        )
+        log.info(
+            f"Boxes with confidence <= {cfg.evaluation.confidence_threshold}: {boxes_below_threshold} ({boxes_below_threshold / total_boxes * 100:.1f}%)"
+        )
+        log.info(
+            f"Score range: min={all_scores.min():.4f}, max={all_scores.max():.4f}, mean={all_scores.mean():.4f}"
+        )
     else:
         log.warning("No predictions made!")
-    
+
     return coco_results
+
 
 @hydra.main(config_path="../configs", config_name="eval", version_base=None)
 def main(cfg: DictConfig):
     base_dir = Path(get_original_cwd())
-    mp.set_start_method('spawn', force=True)
-    
+    mp.set_start_method("spawn", force=True)
+
     # ============================================================
     # Handle dataset_dir (required, passed via Hydra override)
     # ============================================================
-    dataset_dir_str = cfg.get('dataset_dir', None)
+    dataset_dir_str = cfg.get("dataset_dir", None)
     if dataset_dir_str is None:
         raise ValueError(
             "dataset_dir is required. "
             "Usage: python src/eval.py dataset_dir=<dir> [other args]\n"
             "Example: python src/eval.py dataset_dir=triangles_dataset_small run_dir=outputs/18-08-48"
         )
-    
+
     dataset_dir = Path(dataset_dir_str)
     if not dataset_dir.is_absolute():
         dataset_dir = base_dir / dataset_dir
-    
+
     if not dataset_dir.exists():
         raise FileNotFoundError(f"Dataset directory not found: {dataset_dir}")
-    
+
     dataset_jsonl = dataset_dir / "dataset.jsonl"
     dataset_data_dir = dataset_dir / "data"
-    
+
     if not dataset_jsonl.exists():
         raise FileNotFoundError(f"dataset.jsonl not found in {dataset_dir}")
     if not dataset_data_dir.exists():
         raise FileNotFoundError(f"data/ directory not found in {dataset_dir}")
-    
+
     dataset_jsonl = dataset_jsonl.resolve()
     dataset_data_dir = dataset_data_dir.resolve()
-    
+
     # ============================================================
     # Load training config from run_dir (required)
     # Merge order: training config (base) + eval config (overrides) + CLI overrides
     # ============================================================
-    if 'run_dir' not in cfg or not cfg.run_dir:
+    if "run_dir" not in cfg or not cfg.run_dir:
         raise ValueError(
             "run_dir is required. "
             "Usage: python src/eval.py dataset_dir=<dir> run_dir=outputs/18-08-48\n"
             "The run_dir must contain a .hydra/config.yaml file from training."
         )
-    
+
     # run_dir is required, so we can proceed
     run_dir = Path(cfg.run_dir)
     if not run_dir.is_absolute():
         run_dir = base_dir / run_dir
-    
+
     training_config_path = run_dir / ".hydra" / "config.yaml"
     if not training_config_path.exists():
         raise FileNotFoundError(
             f"Training config not found: {training_config_path}\n"
             f"Make sure the run_dir contains a .hydra folder from training."
         )
-    
+
     log.info(f"Loading training config from: {training_config_path}")
     training_cfg = OmegaConf.load(training_config_path)
-    
+
     # Merge: training config (base) → eval defaults → CLI overrides (highest priority).
     # Using HydraConfig.overrides.task ensures ALL CLI args (e.g.
     # model.transform.image_mean) survive the config replacement.
-    eval_defaults = OmegaConf.create({
-        'evaluation': OmegaConf.to_container(cfg.get('evaluation', {}), resolve=True),
-    })
+    eval_defaults = OmegaConf.create(
+        {
+            "evaluation": OmegaConf.to_container(
+                cfg.get("evaluation", {}), resolve=True
+            ),
+        }
+    )
     cli_overrides = list(HydraConfig.get().overrides.task)
-    cli_cfg = OmegaConf.from_dotlist(cli_overrides) if cli_overrides else OmegaConf.create()
-    
+    cli_cfg = (
+        OmegaConf.from_dotlist(cli_overrides) if cli_overrides else OmegaConf.create()
+    )
+
     cfg = OmegaConf.merge(training_cfg, eval_defaults, cli_cfg)
     OmegaConf.set_struct(cfg, False)
-    
+
     log.info(f"Loaded training config from run: {run_dir.name}")
     if cli_overrides:
         log.info(f"CLI overrides applied: {cli_overrides}")
-    
+
     # Set dataset paths (always override with dataset_dir)
     cfg.dataset.data.test_jsonl = str(dataset_jsonl)
     cfg.dataset.data.test_data_dir = str(dataset_data_dir)
-    
+
     log.info(f"Using dataset from dataset_dir: {dataset_dir}")
     log.info(f"  Model: {cfg.model.name}")
     log.info(f"  Classes: {cfg.get('classes', 'auto-discover')}")
     log.info(f"  Test dataset: {cfg.dataset.data.test_jsonl}")
-    
+
     # Device selection for eval: CLI override > auto-detect (CUDA > MPS > CPU)
     # ONNX models only support CUDA/CPU via onnxruntime providers.
     eval_device = cfg.evaluation.get("device", None)
@@ -452,13 +534,15 @@ def main(cfg: DictConfig):
 
     cfg.model.device = str(device)
     log.info(f"Using device: {device}")
-    
+
     # Get classes from top-level config
-    classes = cfg.get('classes', None)
-    
+    classes = cfg.get("classes", None)
+
     # If classes not specified, discover from test dataset
     if classes is None:
-        log.info("Classes not specified in config, auto-discovering from test dataset...")
+        log.info(
+            "Classes not specified in config, auto-discovering from test dataset..."
+        )
         temp_dataset = ViamDataset(
             jsonl_path=cfg.dataset.data.test_jsonl,
             data_dir=cfg.dataset.data.test_data_dir,
@@ -467,13 +551,15 @@ def main(cfg: DictConfig):
         # Get discovered classes from dataset
         classes = sorted(temp_dataset.label_to_id.keys())
         log.info(f"Auto-discovered {len(classes)} classes: {classes}")
-    
+
     # Set model.num_classes from classes (always inferred, not stored in model config)
     cfg.model.num_classes = len(classes)
-    
+
     # Create model
     log.info(f"Creating model: {cfg.model.name}")
-    log.info(f"  Model config: pretrained={cfg.training.get('pretrained', False)}, num_classes={cfg.model.num_classes}")
+    log.info(
+        f"  Model config: pretrained={cfg.training.get('pretrained', False)}, num_classes={cfg.model.num_classes}"
+    )
     if cfg.model.name == "faster_rcnn":
         model = FasterRCNNDetector(cfg).to(device)
         log.info("Faster R-CNN model created and moved to device")
@@ -487,23 +573,25 @@ def main(cfg: DictConfig):
         model = FCOSDetector(cfg).to(device)
         log.info("FCOS model created and moved to device")
     else:
-        raise ValueError(f"Unknown model: {cfg.model.name}. Supported models: faster_rcnn, ssdlite, retinanet, fcos")
- 
+        raise ValueError(
+            f"Unknown model: {cfg.model.name}. Supported models: faster_rcnn, ssdlite, retinanet, fcos"
+        )
+
     # Create test dataset with classes from config
     test_dataset = ViamDataset(
         jsonl_path=cfg.dataset.data.test_jsonl,
         data_dir=cfg.dataset.data.test_data_dir,
         classes=classes,
     )
- 
+
     # Checkpoint path - auto-detect from run_dir if not provided
-    checkpoint_path = cfg.get('checkpoint_path', None)
+    checkpoint_path = cfg.get("checkpoint_path", None)
     if checkpoint_path is None:
         # Auto-detect from run_dir (which is required)
         run_dir_path = Path(cfg.run_dir)
         if not run_dir_path.is_absolute():
             run_dir_path = base_dir / run_dir_path
-        
+
         checkpoint_path = run_dir_path / "best_model.pth"
         if checkpoint_path.exists():
             cfg.checkpoint_path = str(checkpoint_path)
@@ -513,91 +601,105 @@ def main(cfg: DictConfig):
                 f"No checkpoint found. Expected: {checkpoint_path}\n"
                 f"Provide checkpoint_path explicitly: checkpoint_path=path/to/model.pth"
             )
-    
+
     checkpoint_path = Path(checkpoint_path)
     if not checkpoint_path.is_absolute():
         checkpoint_path = base_dir / checkpoint_path
-    
+
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
-    
+
     # Check if ONNX model
-    is_onnx = checkpoint_path.suffix == '.onnx'
-    
+    is_onnx = checkpoint_path.suffix == ".onnx"
+
     # Set output directory to run_dir/eval_<dataset_name>_<checkpoint_name>_<format>/
     # run_dir is required, so we always set this
     run_dir_path = Path(cfg.run_dir)
     if not run_dir_path.is_absolute():
         run_dir_path = base_dir / run_dir_path
-    
+
     # Extract dataset name from dataset_dir
     dataset_name = dataset_dir.name
-    
+
     # Get checkpoint filename (without extension)
     checkpoint_name = checkpoint_path.stem
-    
+
     # Determine format from checkpoint extension (pth or onnx)
-    checkpoint_format = checkpoint_path.suffix[1:] if checkpoint_path.suffix else "pth"  # Remove leading dot
-    
+    checkpoint_format = (
+        checkpoint_path.suffix[1:] if checkpoint_path.suffix else "pth"
+    )  # Remove leading dot
+
     # Set output directory to run_dir/eval_<dataset_name>_<checkpoint_name>_<format>/
-    eval_output_dir = run_dir_path / f"eval_{dataset_name}_{checkpoint_name}_{checkpoint_format}"
+    eval_output_dir = (
+        run_dir_path / f"eval_{dataset_name}_{checkpoint_name}_{checkpoint_format}"
+    )
     OmegaConf.set_struct(cfg, False)
     cfg.logging.save_dir = str(eval_output_dir)
     log.info(f"Evaluation outputs will be saved to: {eval_output_dir}")
-    
+
     if is_onnx:
-        log.info("="*80)
+        log.info("=" * 80)
         log.info("ONNX MODEL EVALUATION")
-        log.info("="*80)
+        log.info("=" * 80)
         # Use ONNX wrapper instead of loading PyTorch weights
         model = ONNXModelWrapper(str(checkpoint_path), device=cfg.model.device)
         log.info(f"Loaded ONNX model: {checkpoint_path}")
     else:
         # Load PyTorch checkpoint
-        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
-        
+        checkpoint = torch.load(
+            checkpoint_path, map_location=device, weights_only=False
+        )
+
         # Prefer EMA weights if available (better for evaluation)
-        if 'model_ema_state_dict' in checkpoint:
+        if "model_ema_state_dict" in checkpoint:
             log.info("Loading Model EMA weights for evaluation")
-            model.load_state_dict(checkpoint['model_ema_state_dict'])
+            model.load_state_dict(checkpoint["model_ema_state_dict"])
         else:
             log.info("Loading standard model weights for evaluation")
-            model.load_state_dict(checkpoint['model_state_dict'])
+            model.load_state_dict(checkpoint["model_state_dict"])
 
     # Check if model has a built-in transform (normalization + resize).
     # All torchvision detection models (Faster R-CNN, SSDLite) have GeneralizedRCNNTransform.
     has_builtin_transform = (
-        hasattr(model, 'model') and hasattr(model.model, 'transform')
+        hasattr(model, "model") and hasattr(model.model, "transform")
     ) or isinstance(model, ONNXModelWrapper)
-    
+
     if has_builtin_transform:
         # Warn if Normalize is in the transforms — it would cause double normalization
         test_transforms_cfg = cfg.dataset.transform.test
-        if test_transforms_cfg and any(t.get('name') == 'Normalize' for t in test_transforms_cfg):
+        if test_transforms_cfg and any(
+            t.get("name") == "Normalize" for t in test_transforms_cfg
+        ):
             log.warning("=" * 80)
-            log.warning("⚠️  Normalize found in dataset transforms, but model has a built-in transform!")
+            log.warning(
+                "⚠️  Normalize found in dataset transforms, but model has a built-in transform!"
+            )
             log.warning("    This will cause DOUBLE NORMALIZATION and broken results.")
             log.warning("    Remove Normalize from configs/dataset/jsonl.yaml")
             log.warning("=" * 80)
     else:
         log.warning("Model does NOT have a built-in transform.")
-        log.warning("Make sure your dataset config includes Normalize in the transforms!")
+        log.warning(
+            "Make sure your dataset config includes Normalize in the transforms!"
+        )
 
     test_transform = build_transforms(cfg, is_train=False, test=True)
     test_dataset = attach_dataset_transform(test_dataset, test_transform)
 
     # Set dataloader parameters.
     # MPS tensors can't be shared across worker processes, so force num_workers=0.
-    if device.type == 'mps':
+    if device.type == "mps":
         num_workers = 0
     else:
         num_workers = cfg.training.num_workers
-    pin_memory = cfg.training.pin_memory and device.type == 'cuda'
+    pin_memory = cfg.training.pin_memory and device.type == "cuda"
 
     if is_onnx:
         eval_batch_size = 1
     else:
-        eval_batch_size = cfg.evaluation.get("batch_size", None) or cfg.training.batch_size
+        eval_batch_size = (
+            cfg.evaluation.get("batch_size", None) or cfg.training.batch_size
+        )
     log.info(f"Eval batch size: {eval_batch_size}")
 
     test_loader = DataLoader(
@@ -615,7 +717,7 @@ def main(cfg: DictConfig):
     # Create output directory
     output_dir = Path(cfg.logging.save_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Save predictions to JSON
     predictions_file = output_dir / f"{cfg.model.name}_predictions.json"
     with open(predictions_file, "w") as f:
@@ -623,9 +725,9 @@ def main(cfg: DictConfig):
     log.info(f"Saved {len(predictions)} predictions to {predictions_file}")
 
     # Convert JSONL to COCO format if needed
-    gt_path_str = cfg.dataset.data.get('test_annotations_coco')
+    gt_path_str = cfg.dataset.data.get("test_annotations_coco")
     gt_path = Path(gt_path_str) if gt_path_str else None
-    
+
     # If no COCO file specified or it doesn't exist, convert from JSONL
     if not gt_path or not gt_path.exists():
         log.info("No COCO format ground truth found, converting from JSONL...")
@@ -634,31 +736,31 @@ def main(cfg: DictConfig):
             jsonl_path=cfg.dataset.data.test_jsonl,
             data_dir=cfg.dataset.data.test_data_dir,
             output_path=coco_gt_path,
-            classes=cfg.get('classes', None),
+            classes=cfg.get("classes", None),
         )
         gt_path = coco_gt_path
-    
+
     # Load COCO ground truth
     coco_gt = COCO(str(gt_path))
-    log.info(f"Loaded ground truth: {len(coco_gt.imgs)} images, {len(coco_gt.anns)} annotations")
-    
+    log.info(
+        f"Loaded ground truth: {len(coco_gt.imgs)} images, {len(coco_gt.anns)} annotations"
+    )
+
     # Evaluate using shared COCO evaluation function
     # This matches the evaluation done during training
-    log.info("="*80)
+    log.info("=" * 80)
     log.info("Running COCO evaluation (same as during training)...")
-    log.info("="*80)
+    log.info("=" * 80)
     metrics = evaluate_coco_predictions(
-        predictions=predictions,
-        coco_gt=coco_gt,
-        verbose=True
+        predictions=predictions, coco_gt=coco_gt, verbose=True
     )
-    
+
     # Precision / Recall at the configured operating point
     iou_thr = cfg.evaluation.get("iou_threshold", 0.5)
     conf_thr = cfg.evaluation.confidence_threshold
-    log.info("="*80)
+    log.info("=" * 80)
     log.info(f"Precision/Recall (IoU>={iou_thr}, confidence>={conf_thr})")
-    log.info("="*80)
+    log.info("=" * 80)
     pr_results = compute_precision_recall(
         predictions=predictions,
         coco_gt=coco_gt,
@@ -666,17 +768,27 @@ def main(cfg: DictConfig):
         confidence_threshold=conf_thr,
     )
 
-    ov = pr_results['overall']
-    class_names = sorted(pr_results['per_class'])
-    col_w = max(len(n) for n in class_names + ['OVERALL'])
+    ov = pr_results["overall"]
+    class_names = sorted(pr_results["per_class"])
+    col_w = max(len(n) for n in class_names + ["OVERALL"])
     col_w = max(col_w, 7)  # minimum width for "OVERALL"
-    log.info(f"  {'Class':<{col_w}s}  {'Prec':>6s}  {'Rec':>6s}  {'F1':>6s}  {'TP':>5s}  {'FP':>5s}  {'FN':>5s}")
-    log.info(f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
+    log.info(
+        f"  {'Class':<{col_w}s}  {'Prec':>6s}  {'Rec':>6s}  {'F1':>6s}  {'TP':>5s}  {'FP':>5s}  {'FN':>5s}"
+    )
+    log.info(
+        f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}"
+    )
     for cls_name in class_names:
-        c = pr_results['per_class'][cls_name]
-        log.info(f"  {cls_name:<{col_w}s}  {c['precision']:6.3f}  {c['recall']:6.3f}  {c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}")
-    log.info(f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
-    log.info(f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  {ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}")
+        c = pr_results["per_class"][cls_name]
+        log.info(
+            f"  {cls_name:<{col_w}s}  {c['precision']:6.3f}  {c['recall']:6.3f}  {c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}"
+        )
+    log.info(
+        f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}"
+    )
+    log.info(
+        f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  {ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}"
+    )
 
     # Precision-recall curve
     if cfg.evaluation.get("plot_roc", False):
@@ -689,23 +801,23 @@ def main(cfg: DictConfig):
         plot_roc_curve(curve_data, output_dir, iou_thr)
 
     # Add metadata to metrics
-    metrics['checkpoint'] = str(checkpoint_path)
-    metrics['num_predictions'] = len(predictions)
-    metrics['is_onnx'] = is_onnx
-    metrics['dataset'] = {
-        'jsonl': str(cfg.dataset.data.test_jsonl),
-        'data_dir': str(cfg.dataset.data.test_data_dir)
+    metrics["checkpoint"] = str(checkpoint_path)
+    metrics["num_predictions"] = len(predictions)
+    metrics["is_onnx"] = is_onnx
+    metrics["dataset"] = {
+        "jsonl": str(cfg.dataset.data.test_jsonl),
+        "data_dir": str(cfg.dataset.data.test_data_dir),
     }
-    metrics['precision_recall'] = pr_results
-    
+    metrics["precision_recall"] = pr_results
+
     # Save metrics with appropriate filename
     model_type = "onnx" if is_onnx else cfg.model.name
     metrics_file = output_dir / f"{model_type}_metrics.json"
     with open(metrics_file, "w") as f:
         json.dump(metrics, f, indent=4)
     log.info(f"Saved metrics to {metrics_file}")
-    
-    log.info("="*80)
+
+    log.info("=" * 80)
     log.info("Final Results:")
     log.info(f"  AP (IoU=0.50:0.95): {metrics['AP']:.4f}")
     log.info(f"  AP50 (IoU=0.50):    {metrics['AP50']:.4f}")
@@ -713,10 +825,10 @@ def main(cfg: DictConfig):
     log.info(f"  Precision (IoU>={iou_thr}, conf>={conf_thr}): {ov['precision']:.4f}")
     log.info(f"  Recall    (IoU>={iou_thr}, conf>={conf_thr}): {ov['recall']:.4f}")
     log.info(f"  F1        (IoU>={iou_thr}, conf>={conf_thr}): {ov['f1']:.4f}")
-    log.info("="*80)
+    log.info("=" * 80)
+
 
 if __name__ == "__main__":
     # Hydra handles CLI overrides automatically - no manual code needed!
     # Just call main() and Hydra will process all CLI arguments
     main()
-

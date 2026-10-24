@@ -9,6 +9,7 @@ Usage (same arguments as eval.py, but sweep_dir instead of run_dir):
     python src/eval_sweep.py sweep_dir=outputs/2026-03-05/21-37-10 dataset_dir=my_test_data
     python src/eval_sweep.py sweep_dir=outputs/2026-03-05/21-37-10 dataset_dir=my_test_data evaluation.visualize=true
 """
+
 import json
 import logging
 import subprocess
@@ -30,7 +31,9 @@ def discover_run_dirs(sweep_dir: Path) -> list[Path]:
         if has_config and has_checkpoint:
             run_dirs.append(child)
         elif has_config and not has_checkpoint:
-            log.warning(f"Skipping {child.name}: has .hydra/config.yaml but no best_model.pth (training incomplete?)")
+            log.warning(
+                f"Skipping {child.name}: has .hydra/config.yaml but no best_model.pth (training incomplete?)"
+            )
     return run_dirs
 
 
@@ -57,16 +60,18 @@ def collect_summary(run_dirs: list[Path]) -> list[dict]:
             metrics = json.load(f)
 
         pr = metrics.get("precision_recall", {}).get("overall", {})
-        rows.append({
-            "run": run_dir.name,
-            "AP": metrics.get("AP", 0.0),
-            "AP50": metrics.get("AP50", 0.0),
-            "AP75": metrics.get("AP75", 0.0),
-            "precision": pr.get("precision", 0.0),
-            "recall": pr.get("recall", 0.0),
-            "f1": pr.get("f1", 0.0),
-            "metrics_file": str(metrics_path),
-        })
+        rows.append(
+            {
+                "run": run_dir.name,
+                "AP": metrics.get("AP", 0.0),
+                "AP50": metrics.get("AP50", 0.0),
+                "AP75": metrics.get("AP75", 0.0),
+                "precision": pr.get("precision", 0.0),
+                "recall": pr.get("recall", 0.0),
+                "f1": pr.get("f1", 0.0),
+                "metrics_file": str(metrics_path),
+            }
+        )
     rows.sort(key=lambda r: r["AP"], reverse=True)
     return rows
 
@@ -127,7 +132,9 @@ def main():
     run_dirs = discover_run_dirs(sweep_dir)
     if not run_dirs:
         log.error(f"No valid run directories found in {sweep_dir}")
-        log.error("A valid run directory must contain .hydra/config.yaml and best_model.pth")
+        log.error(
+            "A valid run directory must contain .hydra/config.yaml and best_model.pth"
+        )
         sys.exit(1)
 
     log.info(f"Found {len(run_dirs)} runs in {sweep_dir}")
@@ -143,18 +150,23 @@ def main():
         log.info("=" * 80)
 
         cmd = [
-            sys.executable, str(eval_script),
+            sys.executable,
+            str(eval_script),
             f"run_dir={run_dir}",
             *forwarded_args,
         ]
         result = subprocess.run(cmd)
         if result.returncode != 0:
-            log.error(f"Evaluation FAILED for {run_dir.name} (exit code {result.returncode})")
+            log.error(
+                f"Evaluation FAILED for {run_dir.name} (exit code {result.returncode})"
+            )
             failed.append(run_dir.name)
 
     # Summary
     log.info("")
-    log.info(f"Evaluation complete: {len(run_dirs) - len(failed)}/{len(run_dirs)} succeeded")
+    log.info(
+        f"Evaluation complete: {len(run_dirs) - len(failed)}/{len(run_dirs)} succeeded"
+    )
     if failed:
         log.warning(f"Failed runs: {', '.join(failed)}")
 

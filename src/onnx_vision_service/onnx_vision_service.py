@@ -57,9 +57,7 @@ class Properties:
 class OnnxVisionService(Vision, Reconfigurable):
     """Vision Service that performs object detection using an ONNX model."""
 
-    MODEL: ClassVar[Model] = Model(
-        ModelFamily("viam", "vision"), "onnx-detector"
-    )
+    MODEL: ClassVar[Model] = Model(ModelFamily("viam", "vision"), "onnx-detector")
 
     def __init__(self, name: str):
         super().__init__(name=name)
@@ -102,13 +100,9 @@ class OnnxVisionService(Vision, Reconfigurable):
         labels_path = config.attributes.fields["labels_path"].string_value
 
         if not model_path:
-            raise Exception(
-                "A 'model_path' to an ONNX model is required."
-            )
+            raise Exception("A 'model_path' to an ONNX model is required.")
         if not Path(model_path).exists():
-            raise Exception(
-                f"ONNX model file not found: {model_path}"
-            )
+            raise Exception(f"ONNX model file not found: {model_path}")
         if not camera_name:
             raise Exception(
                 "A 'camera_name' is required for this vision service module."
@@ -118,9 +112,7 @@ class OnnxVisionService(Vision, Reconfigurable):
                 "A 'labels_path' pointing to a labels.txt file is required."
             )
         if not Path(labels_path).exists():
-            raise Exception(
-                f"Labels file not found: {labels_path}"
-            )
+            raise Exception(f"Labels file not found: {labels_path}")
         return [camera_name], []
 
     def reconfigure(
@@ -132,12 +124,8 @@ class OnnxVisionService(Vision, Reconfigurable):
         self.dependencies = dependencies
 
         # -- Camera dependency ----------------------------------------- #
-        self.camera_name = config.attributes.fields[
-            "camera_name"
-        ].string_value
-        self.camera = self.dependencies[
-            Camera.get_resource_name(self.camera_name)
-        ]
+        self.camera_name = config.attributes.fields["camera_name"].string_value
+        self.camera = self.dependencies[Camera.get_resource_name(self.camera_name)]
 
         # -- Labels ---------------------------------------------------- #
         labels_path = config.attributes.fields["labels_path"].string_value
@@ -147,9 +135,7 @@ class OnnxVisionService(Vision, Reconfigurable):
         # -- Min confidence -------------------------------------------- #
         min_confidence = 0.0
         if "min_confidence" in config.attributes.fields:
-            min_confidence = config.attributes.fields[
-                "min_confidence"
-            ].number_value
+            min_confidence = config.attributes.fields["min_confidence"].number_value
 
         # -- Optional preprocessing ------------------------------------ #
         background_strip_dist = 0.0

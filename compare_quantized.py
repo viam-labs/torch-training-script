@@ -5,6 +5,7 @@ Compare evaluation results between two ONNX models (e.g., original vs quantized)
 Loads cached predictions from evaluate_onnx.py runs and recomputes metrics
 at specified thresholds. No inference needed.
 """
+
 import argparse
 import json
 import logging
@@ -131,8 +132,10 @@ def main():
 
     # COCO metrics comparison
     print(f"\nCOCO Metrics:")
-    print(f"  {'Metric':<8s}  {'Original':>10s}  {'Quantized':>10s}  {'Diff':>10s}  {'Diff%':>8s}")
-    print(f"  {'-'*8}  {'-'*10}  {'-'*10}  {'-'*10}  {'-'*8}")
+    print(
+        f"  {'Metric':<8s}  {'Original':>10s}  {'Quantized':>10s}  {'Diff':>10s}  {'Diff%':>8s}"
+    )
+    print(f"  {'-' * 8}  {'-' * 10}  {'-' * 10}  {'-' * 10}  {'-' * 8}")
 
     coco_keys = ["AP", "AP50", "AP75", "AR100"]
     for key in coco_keys:

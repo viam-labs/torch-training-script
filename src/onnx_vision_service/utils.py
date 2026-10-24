@@ -36,12 +36,11 @@ def decode_image(image: Union[Image.Image, ViamImage]) -> Image.Image:
                 f"Supported types are {SUPPORTED_IMAGE_TYPE}."
             )
             raise ValueError(f"Unsupported image type: {image.mime_type}.")
-        im = Image.open(
-            BytesIO(image.data), formats=LIBRARY_SUPPORTED_FORMATS
-        ).convert("RGB")
+        im = Image.open(BytesIO(image.data), formats=LIBRARY_SUPPORTED_FORMATS).convert(
+            "RGB"
+        )
         return im
 
     raise TypeError(
-        f"Unsupported image type: {type(image)}. "
-        "Expected PIL.Image.Image or ViamImage."
+        f"Unsupported image type: {type(image)}. Expected PIL.Image.Image or ViamImage."
     )

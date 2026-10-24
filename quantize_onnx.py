@@ -7,6 +7,7 @@ activation ranges for accurate quantization. Pre-screens images to
 ensure they produce detections (avoids empty tensor errors in ROI pooling
 observer nodes during calibration).
 """
+
 import argparse
 import json
 import logging
@@ -208,7 +209,9 @@ def main():
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
 
-    output_path = Path(args.output) if args.output else model_path.parent / "model_quantized.onnx"
+    output_path = (
+        Path(args.output) if args.output else model_path.parent / "model_quantized.onnx"
+    )
     dataset_dir = Path(args.calibration_data)
 
     # Read model input shape
@@ -217,7 +220,9 @@ def main():
     input_name = input_info.name
     input_shape = input_info.shape  # [1, 3, H, W]
     input_h, input_w = input_shape[2], input_shape[3]
-    log.info(f"Model input: name={input_name}, shape={input_shape}, type={input_info.type}")
+    log.info(
+        f"Model input: name={input_name}, shape={input_shape}, type={input_info.type}"
+    )
     del session
 
     # Pre-screen calibration images (only keep ones that produce detections)
@@ -266,11 +271,9 @@ def main():
         nodes_to_exclude = []
         if args.exclude_head:
             import onnx as _onnx
+
             _model = _onnx.load(preprocessed_path)
-            nodes_to_exclude = [
-                n.name for n in _model.graph.node
-                if "head" in n.name
-            ]
+            nodes_to_exclude = [n.name for n in _model.graph.node if "head" in n.name]
             log.info(f"Excluding {len(nodes_to_exclude)} head nodes from quantization")
             del _model
 
