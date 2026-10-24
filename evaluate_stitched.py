@@ -466,7 +466,7 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     classes = [
-        l.strip() for l in Path(args.labels).read_text().splitlines() if l.strip()
+        ln.strip() for ln in Path(args.labels).read_text().splitlines() if ln.strip()
     ]
     log.info(f"Classes (category_id 1..N, in order): {classes}")
     cat_id_to_name = {idx + 1: name for idx, name in enumerate(classes)}

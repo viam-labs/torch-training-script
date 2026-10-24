@@ -120,15 +120,12 @@ def run_inference(
     if expects_float:
         log.info("Model expects float32 input (will convert from uint8)")
 
-    # Build label->category_id mapping (1-based, matching jsonl_to_coco)
-    label_to_id = {name: idx + 1 for idx, name in enumerate(classes)}
-
     jsonl_path = dataset_dir / "dataset.jsonl"
     coco_results = []
     image_count = 0
 
     with open(jsonl_path, "r") as f:
-        lines = [l.strip() for l in f if l.strip()]
+        lines = [ln.strip() for ln in f if ln.strip()]
 
     for image_id, line in enumerate(tqdm(lines, desc="Running inference")):
         sample = json.loads(line)
@@ -271,7 +268,7 @@ def main():
 
     # Read labels
     labels_path = Path(args.labels)
-    classes = [l.strip() for l in labels_path.read_text().splitlines() if l.strip()]
+    classes = [ln.strip() for ln in labels_path.read_text().splitlines() if ln.strip()]
     log.info(f"Classes: {classes}")
 
     # Get model input shape
