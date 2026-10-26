@@ -17,10 +17,7 @@ log = logging.getLogger(__name__)
 
 
 def jsonl_to_coco(
-    jsonl_path: str,
-    data_dir: str,
-    output_path: str,
-    classes: Optional[List[str]] = None,
+    jsonl_path: str, data_dir: str, output_path: str, classes: Optional[List[str]] = None
 ) -> str:
     """
     Convert JSONL format to COCO format for evaluation.
@@ -125,20 +122,13 @@ def jsonl_to_coco(
             file_name = Path(image_path).name
 
             coco_data["images"].append(
-                {
-                    "id": image_id,
-                    "file_name": file_name,
-                    "width": img_width,
-                    "height": img_height,
-                }
+                {"id": image_id, "file_name": file_name, "width": img_width, "height": img_height}
             )
 
             # Filter annotations to only include specified classes
             bounding_boxes = data.get("bounding_box_annotations", [])
             filtered_boxes = [
-                bbox
-                for bbox in bounding_boxes
-                if bbox.get("annotation_label") in label_to_id
+                bbox for bbox in bounding_boxes if bbox.get("annotation_label") in label_to_id
             ]
 
             # Add annotations

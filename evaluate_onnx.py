@@ -70,9 +70,7 @@ def plot_roc_curve(curve_data: dict, output_dir: Path, iou_threshold: float) -> 
 
     ax.set_xlabel("Recall", fontsize=13)
     ax.set_ylabel("Precision", fontsize=13)
-    ax.set_title(
-        f"Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})", fontsize=14
-    )
+    ax.set_title(f"Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})", fontsize=14)
     ax.set_xlim([0.0, 1.02])
     ax.set_ylim([0.0, 1.02])
     ax.legend(loc="lower left", fontsize=10)
@@ -141,9 +139,7 @@ def run_inference(
         img = Image.open(img_path).convert("RGB")
         orig_w, orig_h = img.size
         img_resized = img.resize((input_w, input_h), Image.BILINEAR)
-        img_np = np.array(img_resized).transpose(2, 0, 1)[
-            np.newaxis, ...
-        ]  # [1, C, H, W]
+        img_np = np.array(img_resized).transpose(2, 0, 1)[np.newaxis, ...]  # [1, C, H, W]
 
         if expects_float:
             img_np = img_np.astype(np.float32)
@@ -205,9 +201,7 @@ def run_inference(
 
         image_count += 1
 
-    log.info(
-        f"Processed {image_count} images, collected {len(coco_results)} predictions"
-    )
+    log.info(f"Processed {image_count} images, collected {len(coco_results)} predictions")
     return coco_results
 
 
@@ -289,9 +283,7 @@ def main():
         classes=classes,
     )
     coco_gt = COCO(str(gt_path))
-    log.info(
-        f"Ground truth: {len(coco_gt.imgs)} images, {len(coco_gt.anns)} annotations"
-    )
+    log.info(f"Ground truth: {len(coco_gt.imgs)} images, {len(coco_gt.anns)} annotations")
 
     # Run inference and collect ALL predictions (unfiltered)
     if args.vertical_flip > 0:
@@ -322,9 +314,7 @@ def main():
 
     # Compute precision/recall at specified thresholds
     log.info("=" * 60)
-    log.info(
-        f"Precision/Recall (IoU>={args.iou_threshold}, conf>={args.confidence_threshold})"
-    )
+    log.info(f"Precision/Recall (IoU>={args.iou_threshold}, conf>={args.confidence_threshold})")
     log.info("=" * 60)
     pr_results = compute_precision_recall(
         predictions=predictions,
@@ -340,18 +330,14 @@ def main():
     log.info(
         f"  {'Class':<{col_w}s}  {'Prec':>6s}  {'Rec':>6s}  {'F1':>6s}  {'TP':>5s}  {'FP':>5s}  {'FN':>5s}"
     )
-    log.info(
-        f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}"
-    )
+    log.info(f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}")
     for cls_name in class_names:
         c = pr_results["per_class"][cls_name]
         log.info(
             f"  {cls_name:<{col_w}s}  {c['precision']:6.3f}  {c['recall']:6.3f}  "
             f"{c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}"
         )
-    log.info(
-        f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}"
-    )
+    log.info(f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}")
     log.info(
         f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  "
         f"{ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}"

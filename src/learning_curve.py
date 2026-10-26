@@ -86,10 +86,7 @@ def parse_args():
         help="Smallest grid point if --grid not given (default: 2)",
     )
     p.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Seed for val/pool/grid-subset selection (default: 42)",
+        "--seed", type=int, default=42, help="Seed for val/pool/grid-subset selection (default: 42)"
     )
     p.add_argument(
         "--python",
@@ -249,12 +246,8 @@ def plot_curve(results: list[dict], out_path: Path) -> None:
         (axes[1], n_img, "# Training Images", "Learning curve — by image"),
     ]:
         ax.plot(x, ap50, "o-", linewidth=2.5, color="black", label="AP50", zorder=3)
-        ax.plot(
-            x, ap, "s--", linewidth=1.2, color="tab:blue", alpha=0.7, label="AP (50:95)"
-        )
-        ax.plot(
-            x, ap75, "^--", linewidth=1.2, color="tab:orange", alpha=0.7, label="AP75"
-        )
+        ax.plot(x, ap, "s--", linewidth=1.2, color="tab:blue", alpha=0.7, label="AP (50:95)")
+        ax.plot(x, ap75, "^--", linewidth=1.2, color="tab:orange", alpha=0.7, label="AP75")
         ax.set_xlabel(xlabel, fontsize=12)
         ax.set_ylabel("Validation metric", fontsize=12)
         ax.set_title(title, fontsize=13)
@@ -292,9 +285,7 @@ def main():
     #    from this study, per design).
     seqs = discover_sequences(train_jsonl)
     if not seqs:
-        sys.exit(
-            "No sequence_ids found in training set — cannot build a learning curve."
-        )
+        sys.exit("No sequence_ids found in training set — cannot build a learning curve.")
     all_seq_ids = sorted(seqs.keys())
     log.info(
         "Discovered %d sequences (%d images with sequence_id)",
@@ -328,9 +319,7 @@ def main():
         grid = sorted(set(args.grid))
         grid = [g for g in grid if 1 <= g <= len(pool_seq_ids)]
     else:
-        grid = make_geometric_grid(
-            len(pool_seq_ids), args.grid_points, args.min_sequences
-        )
+        grid = make_geometric_grid(len(pool_seq_ids), args.grid_points, args.min_sequences)
     log.info("Grid (n_sequences): %s", grid)
 
     # 5. Manifest (saved up front; updated as runs complete)
@@ -429,9 +418,7 @@ def main():
         with open(manifest_path, "w") as f:
             json.dump(manifest, f, indent=2)
 
-        log.info(
-            "n_sequences=%d  n_images=%d  AP50=%.4f", n_seq, n_imgs, result["AP50"]
-        )
+        log.info("n_sequences=%d  n_images=%d  AP50=%.4f", n_seq, n_imgs, result["AP50"])
 
     # 7. Plot
     plot_path = out_root / "learning_curve.png"

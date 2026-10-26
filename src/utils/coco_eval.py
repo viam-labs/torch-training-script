@@ -75,16 +75,8 @@ def collect_predictions(
                 # Scale boxes back to original image dimensions if requested
                 if scale_to_original and "orig_size" in target:
                     orig_size = target["orig_size"]
-                    orig_h = (
-                        orig_size[0].item()
-                        if torch.is_tensor(orig_size[0])
-                        else orig_size[0]
-                    )
-                    orig_w = (
-                        orig_size[1].item()
-                        if torch.is_tensor(orig_size[1])
-                        else orig_size[1]
-                    )
+                    orig_h = orig_size[0].item() if torch.is_tensor(orig_size[0]) else orig_size[0]
+                    orig_w = orig_size[1].item() if torch.is_tensor(orig_size[1]) else orig_size[1]
 
                     # Current image dimensions (after dataset transform)
                     curr_h, curr_w = images[img_idx].shape[-2:]
@@ -304,26 +296,13 @@ def compute_precision_recall(
     def _metrics(tp: int, fp: int, fn: int) -> Dict:
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
         recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-        f1 = (
-            2 * precision * recall / (precision + recall)
-            if (precision + recall) > 0
-            else 0.0
-        )
-        return {
-            "precision": precision,
-            "recall": recall,
-            "f1": f1,
-            "tp": tp,
-            "fp": fp,
-            "fn": fn,
-        }
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+        return {"precision": precision, "recall": recall, "f1": f1, "tp": tp, "fp": fp, "fn": fn}
 
     per_class = {}
     total_tp, total_fp, total_fn = 0, 0, 0
     for cid, counts in per_class_counts.items():
-        per_class[cat_id_to_name[cid]] = _metrics(
-            counts["tp"], counts["fp"], counts["fn"]
-        )
+        per_class[cat_id_to_name[cid]] = _metrics(counts["tp"], counts["fp"], counts["fn"])
         total_tp += counts["tp"]
         total_fp += counts["fp"]
         total_fn += counts["fn"]
@@ -397,13 +376,7 @@ def compute_det_curves(
     def _build_curve(scores_arr, tp_arr, n_gt):
         """Return precision, recall, scores, and interpolated AP."""
         if len(scores_arr) == 0:
-            return {
-                "precision": [],
-                "recall": [],
-                "scores": [],
-                "n_gt": n_gt,
-                "ap": 0.0,
-            }
+            return {"precision": [], "recall": [], "scores": [], "n_gt": n_gt, "ap": 0.0}
 
         order = np.argsort(-scores_arr)
         scores_sorted = scores_arr[order]

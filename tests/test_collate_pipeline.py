@@ -28,10 +28,7 @@ def reference_gpu_collate(batch, device):
     for image, target in batch:
         images.append(image.to(device))
         targets.append(
-            {
-                k: v.to(device) if isinstance(v, torch.Tensor) else v
-                for k, v in target.items()
-            }
+            {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in target.items()}
         )
     return torch.stack(images, dim=0), targets
 

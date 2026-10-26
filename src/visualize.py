@@ -93,9 +93,7 @@ def draw_image(
         if filter_labels and _cat_name(pred["category_id"]) not in filter_labels:
             continue
         x, y, w, h = pred["bbox"]
-        rect = patches.Rectangle(
-            (x, y), w, h, linewidth=1, edgecolor="r", facecolor="none"
-        )
+        rect = patches.Rectangle((x, y), w, h, linewidth=1, edgecolor="r", facecolor="none")
         ax.add_patch(rect)
         ax.text(
             x,

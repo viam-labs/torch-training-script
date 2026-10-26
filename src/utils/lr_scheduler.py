@@ -56,8 +56,7 @@ class WarmupMultiStepLR(_LRScheduler):
         return [
             base_lr
             * warmup_factor
-            * self.gamma
-            ** self.milestones[: self.last_epoch + 1].count(self.last_epoch)
+            * self.gamma ** self.milestones[: self.last_epoch + 1].count(self.last_epoch)
             for base_lr in self.base_lrs
         ]
 
@@ -125,8 +124,7 @@ class WarmupCosineAnnealingLR(_LRScheduler):
         # Cosine annealing after warmup
         progress = (self._step - self.warmup_iters) / (self.T_max - self.warmup_iters)
         return [
-            self.eta_min
-            + (base_lr - self.eta_min) * (1 + math.cos(math.pi * progress)) / 2
+            self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * progress)) / 2
             for base_lr in self.base_lrs
         ]
 

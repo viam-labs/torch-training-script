@@ -132,9 +132,7 @@ def main():
     run_dirs = discover_run_dirs(sweep_dir)
     if not run_dirs:
         log.error(f"No valid run directories found in {sweep_dir}")
-        log.error(
-            "A valid run directory must contain .hydra/config.yaml and best_model.pth"
-        )
+        log.error("A valid run directory must contain .hydra/config.yaml and best_model.pth")
         sys.exit(1)
 
     log.info(f"Found {len(run_dirs)} runs in {sweep_dir}")
@@ -157,16 +155,12 @@ def main():
         ]
         result = subprocess.run(cmd)
         if result.returncode != 0:
-            log.error(
-                f"Evaluation FAILED for {run_dir.name} (exit code {result.returncode})"
-            )
+            log.error(f"Evaluation FAILED for {run_dir.name} (exit code {result.returncode})")
             failed.append(run_dir.name)
 
     # Summary
     log.info("")
-    log.info(
-        f"Evaluation complete: {len(run_dirs) - len(failed)}/{len(run_dirs)} succeeded"
-    )
+    log.info(f"Evaluation complete: {len(run_dirs) - len(failed)}/{len(run_dirs)} succeeded")
     if failed:
         log.warning(f"Failed runs: {', '.join(failed)}")
 

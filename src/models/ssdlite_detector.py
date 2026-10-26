@@ -32,9 +32,7 @@ class SSDLiteDetector(nn.Module):
             log.warning(
                 "⚠️  When using pretrained weights, the model's built-in transform will handle resizing."
             )
-            log.warning(
-                "⚠️  Remove 'Resize' from your config transforms to avoid double-resizing!"
-            )
+            log.warning("⚠️  Remove 'Resize' from your config transforms to avoid double-resizing!")
         else:
             self.model = ssdlite320_mobilenet_v3_large(weights=None)
 
@@ -49,9 +47,7 @@ class SSDLiteDetector(nn.Module):
             log.info(
                 f"Training from scratch with custom transform - mean: {self.model.transform.image_mean}, std: {self.model.transform.image_std}"
             )
-            log.info(
-                "✓ Config transforms (including Resize) will be applied correctly."
-            )
+            log.info("✓ Config transforms (including Resize) will be applied correctly.")
 
         # Update classification head for custom number of classes if needed
         # Only modify if num_classes is different from default (91 classes in COCO)
@@ -67,9 +63,7 @@ class SSDLiteDetector(nn.Module):
                 log.info(
                     f"  - Your classes: {cfg.model.num_classes + 1} ({cfg.model.num_classes} + background)"
                 )
-                log.info(
-                    "  - Keeping pretrained: Backbone (MobileNetV3), box regression head"
-                )
+                log.info("  - Keeping pretrained: Backbone (MobileNetV3), box regression head")
                 log.info("  - Replacing with random init: Classification head only")
 
             self.model.head.classification_head = SSDLiteClassificationHead(

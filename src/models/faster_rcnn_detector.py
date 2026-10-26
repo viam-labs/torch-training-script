@@ -38,9 +38,7 @@ class FasterRCNNDetector(nn.Module):
             log.warning(
                 "⚠️  When using pretrained weights, the model's built-in transform will handle resizing."
             )
-            log.warning(
-                "⚠️  Remove 'Resize' from your config transforms to avoid double-resizing!"
-            )
+            log.warning("⚠️  Remove 'Resize' from your config transforms to avoid double-resizing!")
 
             # Update num_classes if different from COCO (91 classes)
             if cfg.model.num_classes != 90:  # 90 classes + 1 background
@@ -53,9 +51,7 @@ class FasterRCNNDetector(nn.Module):
                 log.info(
                     f"  - Your classes: {cfg.model.num_classes + 1} ({cfg.model.num_classes} + background)"
                 )
-                log.info(
-                    "  - Keeping pretrained: Backbone, FPN, RPN (feature extraction)"
-                )
+                log.info("  - Keeping pretrained: Backbone, FPN, RPN (feature extraction)")
                 log.info(
                     "  - Replacing with random init: Box predictor (classification + regression)"
                 )
@@ -92,9 +88,7 @@ class FasterRCNNDetector(nn.Module):
             log.info(
                 f"Training from scratch with custom transform - mean: {self.model.transform.image_mean}, std: {self.model.transform.image_std}"
             )
-            log.info(
-                "✓ Config transforms (including Resize) will be applied correctly."
-            )
+            log.info("✓ Config transforms (including Resize) will be applied correctly.")
 
     def forward(self, data, targets=None):
         outputs = self.model(data, targets)

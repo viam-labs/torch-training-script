@@ -83,9 +83,7 @@ class OmniOnnxInference:
         self.min_confidence: float = min_confidence
         self.background_strip_dist: float = background_strip_dist
 
-        self.session = ort.InferenceSession(
-            model_path, providers=["CPUExecutionProvider"]
-        )
+        self.session = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
 
         # Extract input shape [batch, channels, height, width] from metadata.
         input_shape = self.session.get_inputs()[0].shape  # e.g. [1, 3, 480, 640]
@@ -153,9 +151,7 @@ class OmniOnnxInference:
     def _preprocess(self, img_pil: Image.Image) -> np.ndarray:
         """Resize image and convert to uint8 numpy tensor [1, C, H, W]."""
         if self.input_height > 0 and self.input_width > 0:
-            img_resized = img_pil.resize(
-                (self.input_width, self.input_height), Image.BILINEAR
-            )
+            img_resized = img_pil.resize((self.input_width, self.input_height), Image.BILINEAR)
         else:
             img_resized = img_pil
 

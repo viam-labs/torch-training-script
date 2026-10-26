@@ -33,9 +33,7 @@ def check_dataset_consistency(pytorch_metrics: dict, onnx_metrics: dict):
     return dataset_match, pytorch_dataset, onnx_dataset
 
 
-def compare_metrics(
-    pytorch_metrics: dict, onnx_metrics: dict, metrics_to_compare: list
-) -> dict:
+def compare_metrics(pytorch_metrics: dict, onnx_metrics: dict, metrics_to_compare: list) -> dict:
     """Compare metrics between PyTorch and ONNX models."""
     comparison = {}
 
@@ -44,11 +42,7 @@ def compare_metrics(
         onnx_val = onnx_metrics.get(metric, 0.0)
         diff = onnx_val - pytorch_val
 
-        comparison[metric] = {
-            "pytorch": pytorch_val,
-            "onnx": onnx_val,
-            "difference": diff,
-        }
+        comparison[metric] = {"pytorch": pytorch_val, "onnx": onnx_val, "difference": diff}
 
     return comparison
 
@@ -111,9 +105,7 @@ Examples:
     parser.add_argument(
         "pytorch_metrics", nargs="?", help="Path to PyTorch model metrics JSON file"
     )
-    parser.add_argument(
-        "onnx_metrics", nargs="?", help="Path to ONNX model metrics JSON file"
-    )
+    parser.add_argument("onnx_metrics", nargs="?", help="Path to ONNX model metrics JSON file")
     parser.add_argument("output", nargs="?", help="Path to save comparison JSON file")
     parser.add_argument(
         "--pytorch-metrics",

@@ -127,8 +127,7 @@ def _prescreen_calibration_images(
             continue
 
     log.info(
-        f"Found {len(good_images)} images with detections "
-        f"(checked {checked}/{len(candidates)})"
+        f"Found {len(good_images)} images with detections (checked {checked}/{len(candidates)})"
     )
 
     if len(good_images) < num_needed:
@@ -208,9 +207,7 @@ def main():
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
 
-    output_path = (
-        Path(args.output) if args.output else model_path.parent / "model_quantized.onnx"
-    )
+    output_path = Path(args.output) if args.output else model_path.parent / "model_quantized.onnx"
     dataset_dir = Path(args.calibration_data)
 
     # Read model input shape
@@ -219,9 +216,7 @@ def main():
     input_name = input_info.name
     input_shape = input_info.shape  # [1, 3, H, W]
     input_h, input_w = input_shape[2], input_shape[3]
-    log.info(
-        f"Model input: name={input_name}, shape={input_shape}, type={input_info.type}"
-    )
+    log.info(f"Model input: name={input_name}, shape={input_shape}, type={input_info.type}")
     del session
 
     # Pre-screen calibration images (only keep ones that produce detections)

@@ -64,9 +64,7 @@ def unfreeze_layers(model: nn.Module, layer_names: list = None):
             param.requires_grad = True
             unfrozen_count += 1
 
-    log.info(
-        f"Unfroze {unfrozen_count}/{total_count} parameters in layers: {layer_names}"
-    )
+    log.info(f"Unfroze {unfrozen_count}/{total_count} parameters in layers: {layer_names}")
 
 
 def configure_model_for_transfer_learning(model, model_name: str, freeze_config: dict):
@@ -102,9 +100,7 @@ def configure_model_for_transfer_learning(model, model_name: str, freeze_config:
     # Apply freeze settings
     if freeze_config.get("freeze_all", False):
         freeze_layers(actual_model, layer_names=None)
-        log.warning(
-            "⚠️  freeze_all=True: ALL layers frozen! Only unfreezing detection head..."
-        )
+        log.warning("⚠️  freeze_all=True: ALL layers frozen! Only unfreezing detection head...")
         # Unfreeze only the detection head
         if model_name == "faster_rcnn":
             unfreeze_layers(actual_model, layer_names=["roi_heads.box_predictor"])
@@ -147,9 +143,7 @@ def configure_model_for_transfer_learning(model, model_name: str, freeze_config:
             freeze_layers(actual_model, layer_names=layers_to_freeze)
 
     # Count trainable parameters
-    trainable_params = sum(
-        p.numel() for p in actual_model.parameters() if p.requires_grad
-    )
+    trainable_params = sum(p.numel() for p in actual_model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in actual_model.parameters())
 
     log.info(

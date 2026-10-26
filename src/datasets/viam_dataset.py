@@ -91,9 +91,7 @@ class ViamDataset(Dataset):
 
                 image_path = data.get("image_path")
                 if not image_path:
-                    log.warning(
-                        f"Skipping entry on line {line_num}: missing 'image_path'"
-                    )
+                    log.warning(f"Skipping entry on line {line_num}: missing 'image_path'")
                     continue
 
                 # Filter annotations to only include specified classes
@@ -150,9 +148,7 @@ class ViamDataset(Dataset):
         """Return sorted list of class names."""
         return sorted(self.label_to_id.keys())
 
-    def with_transform(
-        self, transform: Optional["DetectionTransform"]
-    ) -> "ViamDataset":
+    def with_transform(self, transform: Optional["DetectionTransform"]) -> "ViamDataset":
         """Return a shallow clone that shares samples but uses a different transform."""
         clone = object.__new__(ViamDataset)
         clone.data_dir = self.data_dir
@@ -221,9 +217,7 @@ class ViamDataset(Dataset):
             # Map annotation label to category_id (1-based, 0 is background)
             label = bbox.get("annotation_label")
             if not label or label not in self.label_to_id:
-                log.warning(
-                    f"Unknown annotation label '{label}' in {image_path}, skipping"
-                )
+                log.warning(f"Unknown annotation label '{label}' in {image_path}, skipping")
                 continue
 
             # Format: [x_min, y_min, x_max, y_max]

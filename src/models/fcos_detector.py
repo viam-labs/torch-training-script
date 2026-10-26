@@ -63,9 +63,7 @@ class FCOSDetector(nn.Module):
                     f"  - Your classes: {cfg.model.num_classes + 1} "
                     f"({cfg.model.num_classes} + background)"
                 )
-                log.info(
-                    "  - Keeping pretrained: Backbone (ResNet50), FPN, box regression head"
-                )
+                log.info("  - Keeping pretrained: Backbone (ResNet50), FPN, box regression head")
                 log.info("  - Replacing with random init: Classification head only")
 
             self.model.head.classification_head = FCOSClassificationHead(

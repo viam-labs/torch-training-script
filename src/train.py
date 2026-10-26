@@ -74,9 +74,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, cfg, model_ema
         # TODO: change number of iterations to 10% of train set or something like that
         warmup_factor = cfg.training.get("warmup_factor", 0.001)  # 1/1000
         optimizer_steps_per_epoch = math.ceil(len(data_loader) / accum_steps)
-        warmup_iters = min(
-            cfg.training.get("warmup_iters", 1000), optimizer_steps_per_epoch - 1
-        )
+        warmup_iters = min(cfg.training.get("warmup_iters", 1000), optimizer_steps_per_epoch - 1)
 
         warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
             optimizer, start_factor=warmup_factor, total_iters=warmup_iters
@@ -116,9 +114,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, cfg, model_ema
         (losses / accum_steps).backward()
 
         # Sync step: end of accumulation window OR final batch of the epoch
-        is_sync = ((batch_idx + 1) % accum_steps == 0) or (
-            batch_idx + 1 == len(data_loader)
-        )
+        is_sync = ((batch_idx + 1) % accum_steps == 0) or (batch_idx + 1 == len(data_loader))
         if is_sync:
             if cfg.training.get("gradient_clip", 0.0) > 0:
                 torch.nn.utils.clip_grad_norm_(
@@ -143,10 +139,7 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, cfg, model_ema
 
         # Update progress bar
         pbar.set_postfix(
-            {
-                "loss": f"{loss_value:.4f}",
-                "lr": f"{optimizer.param_groups[0]['lr']:.6f}",
-            }
+            {"loss": f"{loss_value:.4f}", "lr": f"{optimizer.param_groups[0]['lr']:.6f}"}
         )
 
     # Average losses
@@ -259,8 +252,7 @@ def sequence_aware_split(dataset, val_split: float, seed: int):
     train_seq_count = num_sequences - val_seq_count
 
     log.info(
-        f"Sequence split: {train_seq_count} sequences -> train, "
-        f"{val_seq_count} sequences -> val"
+        f"Sequence split: {train_seq_count} sequences -> train, {val_seq_count} sequences -> val"
     )
     log.info(
         f"Final split: {len(train_indices)} train / {len(val_indices)} val images "
@@ -339,9 +331,7 @@ def prepare_data(cfg: DictConfig):
     # Determine classes BEFORE model creation (model needs correct num_classes)
     classes = cfg.get("classes", None)
     if classes is None:
-        log.info(
-            "No classes specified in config. Auto-discovering from training data..."
-        )
+        log.info("No classes specified in config. Auto-discovering from training data...")
         temp_dataset = ViamDataset(
             jsonl_path=str(train_jsonl),
             data_dir=str(train_data_dir),
@@ -400,9 +390,7 @@ def prepare_data(cfg: DictConfig):
         )
 
         if strategy == "sequence":
-            log.info(
-                f"No val_dir provided. Sequence-aware split with val_split={val_split}"
-            )
+            log.info(f"No val_dir provided. Sequence-aware split with val_split={val_split}")
             train_indices, val_indices = sequence_aware_split(
                 full_dataset, val_split, cfg.experiment.seed
             )
@@ -422,13 +410,10 @@ def prepare_data(cfg: DictConfig):
             train_dataset, val_dataset = random_split(
                 full_dataset, [train_size, val_size], generator=split_generator
             )
-            log.info(
-                f"Random split: {train_size} train / {val_size} val (from {total_size} total)"
-            )
+            log.info(f"Random split: {train_size} train / {val_size} val (from {total_size} total)")
         else:
             raise ValueError(
-                f"Unknown val_split_strategy: '{strategy}'. "
-                f"Supported: 'sequence', 'random'."
+                f"Unknown val_split_strategy: '{strategy}'. Supported: 'sequence', 'random'."
             )
 
     return train_dataset, val_dataset
@@ -581,22 +566,16 @@ def main(cfg: DictConfig):
         if transform_cfg and any(t.get("name") == "Normalize" for t in transform_cfg):
             log.warning("=" * 80)
             log.warning(f"⚠️  Normalize found in '{split_name}' transforms!")
-            log.warning(
-                "    The model's built-in GeneralizedRCNNTransform already normalizes."
-            )
+            log.warning("    The model's built-in GeneralizedRCNNTransform already normalizes.")
             log.warning("    This will cause DOUBLE NORMALIZATION and broken results.")
             log.warning("    Remove Normalize from configs/dataset/jsonl.yaml")
             log.warning("=" * 80)
 
     train_transform = (
-        DetectionTransform(cfg.dataset.transform.train)
-        if cfg.dataset.transform.train
-        else None
+        DetectionTransform(cfg.dataset.transform.train) if cfg.dataset.transform.train else None
     )
     val_transform = (
-        DetectionTransform(cfg.dataset.transform.val)
-        if cfg.dataset.transform.val
-        else None
+        DetectionTransform(cfg.dataset.transform.val) if cfg.dataset.transform.val else None
     )
     train_dataset = attach_dataset_transform(train_dataset, train_transform)
     val_dataset = attach_dataset_transform(val_dataset, val_transform)
@@ -676,9 +655,7 @@ def main(cfg: DictConfig):
         param_groups = split_normalization_params(model)
         wd_groups = [norm_weight_decay, cfg.training.weight_decay]
         parameters = [
-            {"params": p, "weight_decay": w}
-            for p, w in zip(param_groups, wd_groups)
-            if p
+            {"params": p, "weight_decay": w} for p, w in zip(param_groups, wd_groups) if p
         ]
 
         log.info("Optimizer: Separate normalization layer weight decay")
@@ -701,9 +678,7 @@ def main(cfg: DictConfig):
     elif cfg.training.optimizer == "adam":
         # Fallback to Adam if specified
         optimizer = torch.optim.Adam(
-            parameters,
-            lr=cfg.training.learning_rate,
-            weight_decay=cfg.training.weight_decay,
+            parameters, lr=cfg.training.learning_rate, weight_decay=cfg.training.weight_decay
         )
     else:
         raise ValueError(f"Unknown optimizer: {cfg.training.optimizer}")
@@ -803,9 +778,7 @@ def main(cfg: DictConfig):
         writer.add_scalar("Learning_rate", optimizer.param_groups[0]["lr"], epoch)
 
         log.info(f"Epoch {epoch + 1}/{cfg.training.num_epochs}:")
-        log.info(
-            f"  Train Loss: {train_metrics['loss']:.4f} | Val Loss: {val_loss:.4f}"
-        )
+        log.info(f"  Train Loss: {train_metrics['loss']:.4f} | Val Loss: {val_loss:.4f}")
         log.info(
             f"  AP: {coco_metrics['AP']:.4f} | AP50: {coco_metrics['AP50']:.4f} | AP75: {coco_metrics['AP75']:.4f}"
         )

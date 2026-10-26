@@ -22,9 +22,7 @@ class ModelEMA:
         device: Device to store EMA parameters
     """
 
-    def __init__(
-        self, model: nn.Module, decay: float = 0.9998, device: torch.device = None
-    ):
+    def __init__(self, model: nn.Module, decay: float = 0.9998, device: torch.device = None):
         self.decay = decay
         self.device = device if device is not None else torch.device("cpu")
 

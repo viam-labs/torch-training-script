@@ -55,9 +55,7 @@ class ONNXModelWrapper:
 
     def __init__(self, onnx_path: str, device: str = "cpu"):
         if not ONNX_AVAILABLE:
-            raise ImportError(
-                "onnxruntime not installed. Install with: pip install onnxruntime"
-            )
+            raise ImportError("onnxruntime not installed. Install with: pip install onnxruntime")
 
         # Set execution providers based on device
         if device == "cuda":
@@ -81,11 +79,7 @@ class ONNXModelWrapper:
         )
 
         # Check if model expects fixed batch size
-        if (
-            len(input_shape) > 0
-            and isinstance(input_shape[0], int)
-            and input_shape[0] > 0
-        ):
+        if len(input_shape) > 0 and isinstance(input_shape[0], int) and input_shape[0] > 0:
             self.expected_batch_size = input_shape[0]
             log.info(f"ONNX model expects fixed batch size: {self.expected_batch_size}")
         else:
@@ -208,9 +202,7 @@ def visualize_predictions(
                 (x1, y1), x2 - x1, y2 - y1, linewidth=1, edgecolor="r", facecolor="none"
             )
             ax.add_patch(rect)
-            ax.text(
-                x1, y1 - 5, f"{_label_name(label)} {score:.2f}", color="red", fontsize=7
-            )
+            ax.text(x1, y1 - 5, f"{_label_name(label)} {score:.2f}", color="red", fontsize=7)
 
     if targets is not None and targets["boxes"].numel() > 0:
         boxes = targets["boxes"].view(-1, 4)
@@ -277,9 +269,7 @@ def plot_roc_curve(curve_data: dict, output_dir: Path, iou_threshold: float) -> 
 
     ax.set_xlabel("Recall", fontsize=13)
     ax.set_ylabel("Precision", fontsize=13)
-    ax.set_title(
-        f"Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})", fontsize=14
-    )
+    ax.set_title(f"Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})", fontsize=14)
     ax.set_xlim([0.0, 1.02])
     ax.set_ylim([0.0, 1.02])
     ax.legend(loc="lower left", fontsize=10)
@@ -306,11 +296,7 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     vis_dir = Path(cfg.logging.save_dir) / "visualizations" if visualize else None
 
     classes = cfg.get("classes", None)
-    id_to_label = (
-        {idx + 1: label for idx, label in enumerate(sorted(classes))}
-        if classes
-        else None
-    )
+    id_to_label = {idx + 1: label for idx, label in enumerate(sorted(classes))} if classes else None
 
     vis_labels = cfg.evaluation.get("visualize_labels", None)
     filter_labels = set(vis_labels) if vis_labels else None
@@ -324,9 +310,7 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     coco_results = []
 
     with torch.no_grad():
-        for batch_idx, (images, targets) in enumerate(
-            tqdm(data_loader, desc="Evaluating")
-        ):
+        for batch_idx, (images, targets) in enumerate(tqdm(data_loader, desc="Evaluating")):
             outputs = model(images.to(device, non_blocking=True))
 
             if visualize:
@@ -362,16 +346,8 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
                 # Scale boxes back to original image dimensions
                 if "orig_size" in target:
                     orig_size = target["orig_size"]
-                    orig_h = (
-                        orig_size[0].item()
-                        if torch.is_tensor(orig_size[0])
-                        else orig_size[0]
-                    )
-                    orig_w = (
-                        orig_size[1].item()
-                        if torch.is_tensor(orig_size[1])
-                        else orig_size[1]
-                    )
+                    orig_h = orig_size[0].item() if torch.is_tensor(orig_size[0]) else orig_size[0]
+                    orig_w = orig_size[1].item() if torch.is_tensor(orig_size[1]) else orig_size[1]
 
                     curr_h, curr_w = images[img_idx].shape[-2:]
                     scale_h = orig_h / curr_h
@@ -397,9 +373,7 @@ def evaluate_model(model, data_loader, cfg: DictConfig, device: torch.device):
     if total_boxes > 0:
         all_scores = np.array(all_scores)
         boxes_above_threshold = np.sum(all_scores > cfg.evaluation.confidence_threshold)
-        boxes_below_threshold = np.sum(
-            all_scores <= cfg.evaluation.confidence_threshold
-        )
+        boxes_below_threshold = np.sum(all_scores <= cfg.evaluation.confidence_threshold)
 
         log.info(f"Total boxes detected: {total_boxes}")
         log.info(
@@ -482,15 +456,11 @@ def main(cfg: DictConfig):
     # model.transform.image_mean) survive the config replacement.
     eval_defaults = OmegaConf.create(
         {
-            "evaluation": OmegaConf.to_container(
-                cfg.get("evaluation", {}), resolve=True
-            ),
+            "evaluation": OmegaConf.to_container(cfg.get("evaluation", {}), resolve=True),
         }
     )
     cli_overrides = list(HydraConfig.get().overrides.task)
-    cli_cfg = (
-        OmegaConf.from_dotlist(cli_overrides) if cli_overrides else OmegaConf.create()
-    )
+    cli_cfg = OmegaConf.from_dotlist(cli_overrides) if cli_overrides else OmegaConf.create()
 
     cfg = OmegaConf.merge(training_cfg, eval_defaults, cli_cfg)
     OmegaConf.set_struct(cfg, False)
@@ -540,9 +510,7 @@ def main(cfg: DictConfig):
 
     # If classes not specified, discover from test dataset
     if classes is None:
-        log.info(
-            "Classes not specified in config, auto-discovering from test dataset..."
-        )
+        log.info("Classes not specified in config, auto-discovering from test dataset...")
         temp_dataset = ViamDataset(
             jsonl_path=cfg.dataset.data.test_jsonl,
             data_dir=cfg.dataset.data.test_data_dir,
@@ -630,9 +598,7 @@ def main(cfg: DictConfig):
     )  # Remove leading dot
 
     # Set output directory to run_dir/eval_<dataset_name>_<checkpoint_name>_<format>/
-    eval_output_dir = (
-        run_dir_path / f"eval_{dataset_name}_{checkpoint_name}_{checkpoint_format}"
-    )
+    eval_output_dir = run_dir_path / f"eval_{dataset_name}_{checkpoint_name}_{checkpoint_format}"
     OmegaConf.set_struct(cfg, False)
     cfg.logging.save_dir = str(eval_output_dir)
     log.info(f"Evaluation outputs will be saved to: {eval_output_dir}")
@@ -646,9 +612,7 @@ def main(cfg: DictConfig):
         log.info(f"Loaded ONNX model: {checkpoint_path}")
     else:
         # Load PyTorch checkpoint
-        checkpoint = torch.load(
-            checkpoint_path, map_location=device, weights_only=False
-        )
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
 
         # Prefer EMA weights if available (better for evaluation)
         if "model_ema_state_dict" in checkpoint:
@@ -667,9 +631,7 @@ def main(cfg: DictConfig):
     if has_builtin_transform:
         # Warn if Normalize is in the transforms — it would cause double normalization
         test_transforms_cfg = cfg.dataset.transform.test
-        if test_transforms_cfg and any(
-            t.get("name") == "Normalize" for t in test_transforms_cfg
-        ):
+        if test_transforms_cfg and any(t.get("name") == "Normalize" for t in test_transforms_cfg):
             log.warning("=" * 80)
             log.warning(
                 "⚠️  Normalize found in dataset transforms, but model has a built-in transform!"
@@ -679,9 +641,7 @@ def main(cfg: DictConfig):
             log.warning("=" * 80)
     else:
         log.warning("Model does NOT have a built-in transform.")
-        log.warning(
-            "Make sure your dataset config includes Normalize in the transforms!"
-        )
+        log.warning("Make sure your dataset config includes Normalize in the transforms!")
 
     test_transform = build_transforms(cfg, is_train=False, test=True)
     test_dataset = attach_dataset_transform(test_dataset, test_transform)
@@ -697,9 +657,7 @@ def main(cfg: DictConfig):
     if is_onnx:
         eval_batch_size = 1
     else:
-        eval_batch_size = (
-            cfg.evaluation.get("batch_size", None) or cfg.training.batch_size
-        )
+        eval_batch_size = cfg.evaluation.get("batch_size", None) or cfg.training.batch_size
     log.info(f"Eval batch size: {eval_batch_size}")
 
     test_loader = DataLoader(
@@ -742,18 +700,14 @@ def main(cfg: DictConfig):
 
     # Load COCO ground truth
     coco_gt = COCO(str(gt_path))
-    log.info(
-        f"Loaded ground truth: {len(coco_gt.imgs)} images, {len(coco_gt.anns)} annotations"
-    )
+    log.info(f"Loaded ground truth: {len(coco_gt.imgs)} images, {len(coco_gt.anns)} annotations")
 
     # Evaluate using shared COCO evaluation function
     # This matches the evaluation done during training
     log.info("=" * 80)
     log.info("Running COCO evaluation (same as during training)...")
     log.info("=" * 80)
-    metrics = evaluate_coco_predictions(
-        predictions=predictions, coco_gt=coco_gt, verbose=True
-    )
+    metrics = evaluate_coco_predictions(predictions=predictions, coco_gt=coco_gt, verbose=True)
 
     # Precision / Recall at the configured operating point
     iou_thr = cfg.evaluation.get("iou_threshold", 0.5)
@@ -775,17 +729,13 @@ def main(cfg: DictConfig):
     log.info(
         f"  {'Class':<{col_w}s}  {'Prec':>6s}  {'Rec':>6s}  {'F1':>6s}  {'TP':>5s}  {'FP':>5s}  {'FN':>5s}"
     )
-    log.info(
-        f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}"
-    )
+    log.info(f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}")
     for cls_name in class_names:
         c = pr_results["per_class"][cls_name]
         log.info(
             f"  {cls_name:<{col_w}s}  {c['precision']:6.3f}  {c['recall']:6.3f}  {c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}"
         )
-    log.info(
-        f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}"
-    )
+    log.info(f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}")
     log.info(
         f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  {ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}"
     )

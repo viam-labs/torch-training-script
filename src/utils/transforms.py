@@ -105,9 +105,7 @@ class DetectionTransform:
                     image = F.adjust_brightness(
                         image, random.uniform(1 - brightness, 1 + brightness)
                     )
-                    image = F.adjust_contrast(
-                        image, random.uniform(1 - contrast, 1 + contrast)
-                    )
+                    image = F.adjust_contrast(image, random.uniform(1 - contrast, 1 + contrast))
                     image = F.adjust_saturation(
                         image, random.uniform(1 - saturation, 1 + saturation)
                     )
@@ -136,9 +134,7 @@ class DetectionTransform:
         if not valid.all():
             boxes = boxes[valid]
             labels = labels[valid]
-            log.warning(
-                f"Removed {len(valid) - valid.sum()} invalid boxes after transforms"
-            )
+            log.warning(f"Removed {len(valid) - valid.sum()} invalid boxes after transforms")
 
         target["boxes"] = boxes
         target["labels"] = labels
@@ -189,9 +185,7 @@ class DetectionTransform:
         return image, new_boxes
 
 
-def detection_collate(
-    batch: List[Tuple[torch.Tensor, Dict]],
-) -> Tuple[torch.Tensor, List[Dict]]:
+def detection_collate(batch: List[Tuple[torch.Tensor, Dict]]) -> Tuple[torch.Tensor, List[Dict]]:
     """Collate (image, target) samples into a batched CPU tensor + target list.
 
     Runs in DataLoader worker processes, so it must not touch CUDA — the
@@ -398,7 +392,5 @@ def background_strip(image: torch.Tensor, dist: float = 150) -> torch.Tensor:
     rgb_u8_chw = (t01 * 255.0).round().clamp(0, 255).to(torch.uint8)
     rgb_u8_hwc = rgb_u8_chw.permute(1, 2, 0).contiguous().numpy()
     result_hwc = _background_strip_np(rgb_u8_hwc, dist=dist)
-    result_chw = (
-        torch.from_numpy(result_hwc.transpose(2, 0, 1).copy()).float().div_(255.0)
-    )
+    result_chw = torch.from_numpy(result_hwc.transpose(2, 0, 1).copy()).float().div_(255.0)
     return result_chw

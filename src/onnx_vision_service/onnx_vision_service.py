@@ -88,9 +88,7 @@ class OnnxVisionService(Vision, Reconfigurable):
         return service
 
     @classmethod
-    def validate_config(
-        cls, config: ServiceConfig
-    ) -> Tuple[Sequence[str], Sequence[str]]:
+    def validate_config(cls, config: ServiceConfig) -> Tuple[Sequence[str], Sequence[str]]:
         """Validate JSON configuration.
 
         Returns (dependencies, optional_dependencies).
@@ -104,13 +102,9 @@ class OnnxVisionService(Vision, Reconfigurable):
         if not Path(model_path).exists():
             raise Exception(f"ONNX model file not found: {model_path}")
         if not camera_name:
-            raise Exception(
-                "A 'camera_name' is required for this vision service module."
-            )
+            raise Exception("A 'camera_name' is required for this vision service module.")
         if not labels_path:
-            raise Exception(
-                "A 'labels_path' pointing to a labels.txt file is required."
-            )
+            raise Exception("A 'labels_path' pointing to a labels.txt file is required.")
         if not Path(labels_path).exists():
             raise Exception(f"Labels file not found: {labels_path}")
         return [camera_name], []
@@ -140,9 +134,7 @@ class OnnxVisionService(Vision, Reconfigurable):
         # -- Optional preprocessing ------------------------------------ #
         background_strip_dist = 0.0
         if "background_strip_dist" in config.attributes.fields:
-            background_strip_dist = config.attributes.fields[
-                "background_strip_dist"
-            ].number_value
+            background_strip_dist = config.attributes.fields["background_strip_dist"].number_value
 
         # -- ONNX model (via dependency-free inference core) ------------ #
         model_path = config.attributes.fields["model_path"].string_value
@@ -165,8 +157,7 @@ class OnnxVisionService(Vision, Reconfigurable):
             )
         else:
             LOGGER.info(
-                f"Model input size: "
-                f"{self.inference.input_height}x{self.inference.input_width}"
+                f"Model input size: {self.inference.input_height}x{self.inference.input_width}"
             )
 
         # Log output info
@@ -245,9 +236,7 @@ class OnnxVisionService(Vision, Reconfigurable):
 
         if return_detections:
             try:
-                detections = await self.get_detections(
-                    images[0], extra=extra, timeout=timeout
-                )
+                detections = await self.get_detections(images[0], extra=extra, timeout=timeout)
                 result.detections = detections
             except Exception as e:
                 LOGGER.info(f"get_detections failed: {e}")

@@ -39,10 +39,7 @@ def load_dataset(dataset_dir: Path) -> list[dict]:
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError as e:
-                print(
-                    f"WARN: {jsonl_path}:{line_num} malformed JSON: {e}",
-                    file=sys.stderr,
-                )
+                print(f"WARN: {jsonl_path}:{line_num} malformed JSON: {e}", file=sys.stderr)
                 continue
 
             binary_data_id = entry.get("binary_data_id") or entry.get("binaryDataId")
@@ -97,9 +94,7 @@ def dedupe(images: list[dict]) -> list[dict]:
     return list(seen.values())
 
 
-def project_split(
-    images: list[dict], val_split: float, seed: int
-) -> tuple[set[str], set[str]]:
+def project_split(images: list[dict], val_split: float, seed: int) -> tuple[set[str], set[str]]:
     """Replicate sequence_aware_split from train.py, but return only the sequence partitions.
 
     Returns (train_seq_ids, val_seq_ids). Images without sequence_id are implicitly train.
@@ -188,9 +183,7 @@ def print_table(title: str, stats: dict[str, dict], show_split: bool = True) -> 
     name_w = max(len(headers[0]), max(len(name) for name, _ in rows))
     num_w = {h: max(len(h), max(len(str(s[h])) for _, s in rows)) for h in headers[1:]}
 
-    header_line = f"{headers[0]:<{name_w}}  " + "  ".join(
-        f"{h:>{num_w[h]}}" for h in headers[1:]
-    )
+    header_line = f"{headers[0]:<{name_w}}  " + "  ".join(f"{h:>{num_w[h]}}" for h in headers[1:])
     sep = "-" * len(header_line)
 
     print(f"\n{title}")
@@ -198,9 +191,7 @@ def print_table(title: str, stats: dict[str, dict], show_split: bool = True) -> 
     print(header_line)
     print(sep)
     for name, s in rows:
-        row = f"{name:<{name_w}}  " + "  ".join(
-            f"{s[h]:>{num_w[h]}}" for h in headers[1:]
-        )
+        row = f"{name:<{name_w}}  " + "  ".join(f"{s[h]:>{num_w[h]}}" for h in headers[1:])
         print(row)
     print(sep)
 
@@ -247,9 +238,7 @@ def main() -> None:
 
     images = dedupe(all_images)
     n_with_seq = sum(1 for i in images if i["sequence_id"] is not None)
-    n_unique_seqs = len(
-        {i["sequence_id"] for i in images if i["sequence_id"] is not None}
-    )
+    n_unique_seqs = len({i["sequence_id"] for i in images if i["sequence_id"] is not None})
     print(
         f"\nTotal: {len(images)} unique images, "
         f"{n_with_seq} with sequence_id ({n_unique_seqs} unique sequences), "
@@ -283,9 +272,7 @@ def main() -> None:
         )
     else:
         matched = {k: v for k, v in stats.items() if k.startswith(CLASS_PREFIX)}
-        print_table(
-            f"Classes (prefix '{CLASS_PREFIX}')", matched, show_split=show_split
-        )
+        print_table(f"Classes (prefix '{CLASS_PREFIX}')", matched, show_split=show_split)
 
 
 if __name__ == "__main__":

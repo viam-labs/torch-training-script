@@ -128,25 +128,18 @@ def runs_dir(workspace):
 
     mirrored = 0
     for src in sorted(Path(external).resolve().iterdir()):
-        if not (
-            (src / ".hydra" / "config.yaml").is_file()
-            and (src / "best_model.pth").is_file()
-        ):
+        if not ((src / ".hydra" / "config.yaml").is_file() and (src / "best_model.pth").is_file()):
             continue
         dst = runs / src.name
         (dst / ".hydra").mkdir(parents=True)
         shutil.copy(src / ".hydra" / "config.yaml", dst / ".hydra" / "config.yaml")
         (dst / "best_model.pth").symlink_to(src / "best_model.pth")
         mirrored += 1
-    assert mirrored, (
-        f"no run dirs with best_model.pth and .hydra/config.yaml in {external}"
-    )
+    assert mirrored, f"no run dirs with best_model.pth and .hydra/config.yaml in {external}"
     return runs
 
 
-def make_pytorch_metrics(
-    path: Path, run_dir: Path, dataset_name: str = "omniteststitch"
-) -> dict:
+def make_pytorch_metrics(path: Path, run_dir: Path, dataset_name: str = "omniteststitch") -> dict:
     """A faster_rcnn_metrics.json with absolute paths, as eval.py writes it."""
     metrics = {
         "AP": 0.282,
@@ -165,24 +158,13 @@ def make_pytorch_metrics(
     return metrics
 
 
-def run_convert(
-    workspace: Path, run_dir: Path, *extra_args: str
-) -> subprocess.CompletedProcess:
-    cmd = [
-        "bash",
-        "convert_model.sh",
-        str(run_dir),
-        "--dataset-dir",
-        "testset",
-        *extra_args,
-    ]
+def run_convert(workspace: Path, run_dir: Path, *extra_args: str) -> subprocess.CompletedProcess:
+    cmd = ["bash", "convert_model.sh", str(run_dir), "--dataset-dir", "testset", *extra_args]
     return subprocess.run(cmd, cwd=workspace, capture_output=True, text=True)
 
 
 def list_run_dirs(runs_dir: Path) -> list:
-    run_dirs = sorted(
-        d for d in runs_dir.iterdir() if (d / ".hydra" / "config.yaml").is_file()
-    )
+    run_dirs = sorted(d for d in runs_dir.iterdir() if (d / ".hydra" / "config.yaml").is_file())
     assert run_dirs, f"no run dirs found in {runs_dir}"
     return run_dirs
 
@@ -229,11 +211,7 @@ def test_full_package_with_eval_and_comparison(workspace, runs_dir):
     make_pytorch_metrics(metrics_path, run_dir, dataset_name="testset")
 
     result = run_convert(
-        workspace,
-        run_dir,
-        "--evaluate-converted-model",
-        "--pytorch-metrics",
-        str(metrics_path),
+        workspace, run_dir, "--evaluate-converted-model", "--pytorch-metrics", str(metrics_path)
     )
     assert result.returncode == 0, result.stderr + result.stdout
 
@@ -280,11 +258,7 @@ def test_comparison_falls_back_on_dataset_mismatch(workspace, runs_dir):
     make_pytorch_metrics(metrics_path, run_dir)  # dataset omniteststitch
 
     result = run_convert(
-        workspace,
-        run_dir,
-        "--evaluate-converted-model",
-        "--pytorch-metrics",
-        str(metrics_path),
+        workspace, run_dir, "--evaluate-converted-model", "--pytorch-metrics", str(metrics_path)
     )
     assert result.returncode == 0, result.stderr + result.stdout
     assert "Falling back to" in result.stdout
@@ -303,11 +277,7 @@ def test_comparison_skipped_on_dataset_mismatch_without_fallback(workspace, runs
     make_pytorch_metrics(metrics_path, run_dir)  # dataset omniteststitch
 
     result = run_convert(
-        workspace,
-        run_dir,
-        "--evaluate-converted-model",
-        "--pytorch-metrics",
-        str(metrics_path),
+        workspace, run_dir, "--evaluate-converted-model", "--pytorch-metrics", str(metrics_path)
     )
     assert result.returncode == 0, result.stderr + result.stdout
     assert "Skipping comparison" in result.stdout

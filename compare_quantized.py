@@ -132,9 +132,7 @@ def main():
 
     # COCO metrics comparison
     print("\nCOCO Metrics:")
-    print(
-        f"  {'Metric':<8s}  {'Original':>10s}  {'Quantized':>10s}  {'Diff':>10s}  {'Diff%':>8s}"
-    )
+    print(f"  {'Metric':<8s}  {'Original':>10s}  {'Quantized':>10s}  {'Diff':>10s}  {'Diff%':>8s}")
     print(f"  {'-' * 8}  {'-' * 10}  {'-' * 10}  {'-' * 10}  {'-' * 8}")
 
     coco_keys = ["AP", "AP50", "AP75", "AR100"]
@@ -143,22 +141,16 @@ def main():
         quant_val = quant_coco.get(key, 0.0)
         diff = quant_val - orig_val
         diff_pct = (diff / orig_val * 100) if orig_val > 0 else 0
-        print(
-            f"  {key:<8s}  {orig_val:10.4f}  {quant_val:10.4f}  {diff:+10.4f}  {diff_pct:+7.2f}%"
-        )
+        print(f"  {key:<8s}  {orig_val:10.4f}  {quant_val:10.4f}  {diff:+10.4f}  {diff_pct:+7.2f}%")
 
     # Precision/Recall comparison
-    print(
-        f"\nPrecision/Recall (IoU>={args.iou_threshold}, conf>={args.confidence_threshold}):"
-    )
+    print(f"\nPrecision/Recall (IoU>={args.iou_threshold}, conf>={args.confidence_threshold}):")
 
     orig_ov = orig_pr["overall"]
     quant_ov = quant_pr["overall"]
 
     # Per-class
-    class_names = sorted(
-        set(orig_pr["per_class"].keys()) | set(quant_pr["per_class"].keys())
-    )
+    class_names = sorted(set(orig_pr["per_class"].keys()) | set(quant_pr["per_class"].keys()))
     col_w = max(len(n) for n in class_names + ["OVERALL"])
     col_w = max(col_w, 7)
 

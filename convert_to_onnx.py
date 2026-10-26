@@ -149,9 +149,7 @@ def _find_image_with_detections(
     if not dataset_jsonl.exists():
         raise FileNotFoundError(f"dataset.jsonl not found in {dataset_dir}")
 
-    log.info(
-        f"Searching dataset for an image with detections (score > {score_threshold})..."
-    )
+    log.info(f"Searching dataset for an image with detections (score > {score_threshold})...")
 
     # Read all image paths from dataset
     image_paths = []
@@ -220,21 +218,13 @@ def _find_image_with_detections(
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Convert PyTorch detection model to ONNX format"
-    )
+    parser = argparse.ArgumentParser(description="Convert PyTorch detection model to ONNX format")
     parser.add_argument(
         "--checkpoint", required=True, help="Path to PyTorch checkpoint (.pth file)"
     )
-    parser.add_argument(
-        "--config", required=True, help="Path to Hydra config file (.yaml)"
-    )
-    parser.add_argument(
-        "--output", required=True, help="Output path for ONNX model (.onnx file)"
-    )
-    parser.add_argument(
-        "--device", default="cpu", help="Device for conversion (cpu or cuda)"
-    )
+    parser.add_argument("--config", required=True, help="Path to Hydra config file (.yaml)")
+    parser.add_argument("--output", required=True, help="Output path for ONNX model (.onnx file)")
+    parser.add_argument("--device", default="cpu", help="Device for conversion (cpu or cuda)")
     parser.add_argument(
         "--image-input",
         help="Path to a single image file to use as dummy input (required if dataset-dir not provided)",
@@ -276,9 +266,7 @@ def main():
         raise ValueError(
             f"Unknown model: {model_name}. Supported: faster_rcnn, ssdlite, retinanet, fcos"
         )
-    checkpoint = torch.load(
-        args.checkpoint, map_location=args.device, weights_only=False
-    )
+    checkpoint = torch.load(args.checkpoint, map_location=args.device, weights_only=False)
     detector.load_state_dict(checkpoint["model_state_dict"])
     base_model = detector.model
 
@@ -310,9 +298,7 @@ def main():
     with torch.no_grad():
         boxes, labels, scores = model(dummy_input)
         num_confident = int((scores > 0.3).sum())
-        log.info(
-            f"✓ PyTorch test: {len(boxes)} detections ({num_confident} with score > 0.3)"
-        )
+        log.info(f"✓ PyTorch test: {len(boxes)} detections ({num_confident} with score > 0.3)")
         log.info(
             f"  Output types: boxes={boxes.dtype}, labels={labels.dtype}, scores={scores.dtype}"
         )
@@ -351,9 +337,7 @@ def main():
     # Warn if input name is not "image" (Viam requires this)
     if input_names and input_names[0] != "image":
         log.warning(f"  ⚠️  Input name is '{input_names[0]}', but Viam requires 'image'")
-        log.warning(
-            "     You may need to rename it or re-export with input_names=['image']"
-        )
+        log.warning("     You may need to rename it or re-export with input_names=['image']")
 
     # Quick ONNX inference test on the SAME image
     log.info("\nTesting ONNX inference on same image...")
@@ -361,9 +345,7 @@ def main():
     outputs = sess.run(None, {"image": dummy_input.numpy()})
     boxes_onnx, labels_onnx, scores_onnx = outputs
     onnx_confident = int((scores_onnx > 0.3).sum())
-    log.info(
-        f"✓ ONNX test: {len(boxes_onnx)} detections ({onnx_confident} with score > 0.3)"
-    )
+    log.info(f"✓ ONNX test: {len(boxes_onnx)} detections ({onnx_confident} with score > 0.3)")
     log.info(
         f"  Output types: boxes={boxes_onnx.dtype}, labels={labels_onnx.dtype}, scores={scores_onnx.dtype}"
     )
@@ -379,18 +361,14 @@ def main():
             f"✅ Both PyTorch ({pytorch_detections}) and ONNX ({onnx_confident}) produce detections"
         )
     elif pytorch_detections > 0 and onnx_confident == 0:
-        log.error(
-            f"❌ PyTorch produced {pytorch_detections} detections but ONNX produced NONE!"
-        )
+        log.error(f"❌ PyTorch produced {pytorch_detections} detections but ONNX produced NONE!")
         log.error(
             "   The ONNX conversion may be broken. Check normalization and input preprocessing."
         )
         sys.exit(1)
     elif pytorch_detections == 0 and onnx_confident == 0:
         log.warning("⚠️  Neither PyTorch nor ONNX produced detections on this image.")
-        log.warning(
-            "   The model may not be trained well, or the image has no objects."
-        )
+        log.warning("   The model may not be trained well, or the image has no objects.")
     else:
         log.warning(
             f"⚠️  ONNX ({onnx_confident}) produced detections but PyTorch ({pytorch_detections}) did not. Unexpected."
