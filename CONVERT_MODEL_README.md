@@ -164,14 +164,14 @@ import numpy as np
 from PIL import Image
 
 # Load and preprocess image (float32, range [0, 1])
-img = Image.open('image.jpg').convert('RGB')
+img = Image.open("image.jpg").convert("RGB")
 img_tensor = np.array(img).astype(np.float32) / 255.0
 img_tensor = img_tensor.transpose(2, 0, 1)  # HWC -> CHW
 img_batch = img_tensor[np.newaxis, ...]  # Add batch dimension
 
 # Run inference
 session = ort.InferenceSession("outputs/2026-02-02/15-15-47/onnx_model/model.onnx")
-outputs = session.run(None, {'input': img_batch})
+outputs = session.run(None, {"input": img_batch})
 locations, scores, categories = outputs
 ```
 

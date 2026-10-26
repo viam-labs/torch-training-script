@@ -19,6 +19,7 @@ It reports two metric sets:
   (treated as pseudo-GT after confidence filtering). Whether stitching itself
   costs accuracy relative to how the model behaves on each view alone.
 """
+
 import argparse
 import json
 import logging
@@ -77,8 +78,7 @@ def find_single_view_samples(jsonl_path: Path, dataset_dir: Path) -> List[Dict]:
             except json.JSONDecodeError:
                 continue
             tags = {
-                a.get("annotation_label")
-                for a in entry.get("classification_annotations", []) or []
+                a.get("annotation_label") for a in entry.get("classification_annotations", []) or []
             }
             if SINGLE_VIEW_TAG not in tags:
                 continue
@@ -103,8 +103,7 @@ def pair_samples(samples: List[Dict], seed: int) -> List[Tuple[Dict, Dict]]:
     indices = list(range(len(samples)))
     rng.shuffle(indices)
     pairs: List[Tuple[Dict, Dict]] = [
-        (samples[indices[i]], samples[indices[i + 1]])
-        for i in range(0, len(indices) - 1, 2)
+        (samples[indices[i]], samples[indices[i + 1]]) for i in range(0, len(indices) - 1, 2)
     ]
     if len(indices) % 2 == 1:
         dropped = samples[indices[-1]]["_resolved_path"]
@@ -176,9 +175,7 @@ def boxes_to_coco_preds(
     ]
 
 
-def transpose_pixel_boxes(
-    boxes_x1y1x2y2: np.ndarray, half: str, input_w: int
-) -> np.ndarray:
+def transpose_pixel_boxes(boxes_x1y1x2y2: np.ndarray, half: str, input_w: int) -> np.ndarray:
     """Map pixel boxes from per-view inference coords into stitched coords.
 
     Per-view inference runs at (input_h, input_w); the view occupies half the
@@ -326,7 +323,13 @@ def draw_visualization(
     for ann in gt_annotations:
         x, y, w, h = ann["bbox"]
         rect = patches.Rectangle(
-            (x, y), w, h, linewidth=2, edgecolor="lime", facecolor="none", linestyle="--"
+            (x, y),
+            w,
+            h,
+            linewidth=2,
+            edgecolor="lime",
+            facecolor="none",
+            linestyle="--",
         )
         ax.add_patch(rect)
         name = cat_id_to_name.get(ann["category_id"], str(ann["category_id"]))
@@ -336,13 +339,15 @@ def draw_visualization(
         if pred["score"] < confidence_threshold:
             continue
         x, y, w, h = pred["bbox"]
-        rect = patches.Rectangle(
-            (x, y), w, h, linewidth=1.5, edgecolor="red", facecolor="none"
-        )
+        rect = patches.Rectangle((x, y), w, h, linewidth=1.5, edgecolor="red", facecolor="none")
         ax.add_patch(rect)
         name = cat_id_to_name.get(pred["category_id"], str(pred["category_id"]))
         ax.text(
-            x, y + h + 12, f"Stitched:{name} {pred['score']:.2f}", color="red", fontsize=7
+            x,
+            y + h + 12,
+            f"Stitched:{name} {pred['score']:.2f}",
+            color="red",
+            fontsize=7,
         )
 
     for pred in per_view_preds:
@@ -350,7 +355,13 @@ def draw_visualization(
             continue
         x, y, w, h = pred["bbox"]
         rect = patches.Rectangle(
-            (x, y), w, h, linewidth=1, edgecolor="orange", facecolor="none", linestyle=":"
+            (x, y),
+            w,
+            h,
+            linewidth=1,
+            edgecolor="orange",
+            facecolor="none",
+            linestyle=":",
         )
         ax.add_patch(rect)
         name = cat_id_to_name.get(pred["category_id"], str(pred["category_id"]))
@@ -380,14 +391,14 @@ def _log_pr(label: str, pr_results: Dict) -> None:
         f"  {'Class':<{col_w}s}  {'Prec':>6s}  {'Rec':>6s}  {'F1':>6s}  "
         f"{'TP':>5s}  {'FP':>5s}  {'FN':>5s}"
     )
-    log.info(f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
+    log.info(f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}")
     for name in class_names:
         c = pr_results["per_class"][name]
         log.info(
             f"  {name:<{col_w}s}  {c['precision']:6.3f}  {c['recall']:6.3f}  "
             f"{c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}"
         )
-    log.info(f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}")
+    log.info(f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}")
     log.info(
         f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  "
         f"{ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}"
@@ -397,16 +408,15 @@ def _log_pr(label: str, pr_results: Dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Evaluate the omni-detector on synthetic stitched pairs of "
-            "single-view screenshots."
+            "Evaluate the omni-detector on synthetic stitched pairs of single-view screenshots."
         )
     )
     parser.add_argument("--model", required=True, help="Path to ONNX model")
+    parser.add_argument("--labels", required=True, help="Path to labels.txt (one class per line)")
     parser.add_argument(
-        "--labels", required=True, help="Path to labels.txt (one class per line)"
-    )
-    parser.add_argument(
-        "--test-data", required=True, help="Path to dataset directory (contains dataset.jsonl, data/)"
+        "--test-data",
+        required=True,
+        help="Path to dataset directory (contains dataset.jsonl, data/)",
     )
     parser.add_argument("--output-dir", required=True, help="Directory for outputs")
     parser.add_argument(
@@ -427,9 +437,7 @@ def main() -> None:
         default=0.5,
         help="Per-view predictions >= this score are treated as pseudo-GT",
     )
-    parser.add_argument(
-        "--seed", type=int, default=0, help="RNG seed for reproducible pairing"
-    )
+    parser.add_argument("--seed", type=int, default=0, help="RNG seed for reproducible pairing")
     parser.add_argument(
         "--visualize",
         type=int,
@@ -442,7 +450,7 @@ def main() -> None:
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    classes = [l.strip() for l in Path(args.labels).read_text().splitlines() if l.strip()]
+    classes = [ln.strip() for ln in Path(args.labels).read_text().splitlines() if ln.strip()]
     log.info(f"Classes (category_id 1..N, in order): {classes}")
     cat_id_to_name = {idx + 1: name for idx, name in enumerate(classes)}
 
@@ -466,9 +474,7 @@ def main() -> None:
             f"ONNX input width {input_w} is odd; cannot split evenly for side-by-side stitching."
         )
         sys.exit(1)
-    log.info(
-        f"ONNX input: name={input_name}, type={input_type}, shape=({input_h}, {input_w})"
-    )
+    log.info(f"ONNX input: name={input_name}, type={input_type}, shape=({input_h}, {input_w})")
 
     jsonl_path = dataset_dir / "dataset.jsonl"
     if not jsonl_path.exists():
@@ -477,9 +483,7 @@ def main() -> None:
 
     samples = find_single_view_samples(jsonl_path, dataset_dir)
     if len(samples) < 2:
-        log.error(
-            f"Need at least 2 single-view samples; found {len(samples)}. Exiting."
-        )
+        log.error(f"Need at least 2 single-view samples; found {len(samples)}. Exiting.")
         sys.exit(1)
 
     pairs = pair_samples(samples, args.seed)
@@ -541,12 +545,8 @@ def main() -> None:
                 input_w=input_w,
             )
 
-    (output_dir / "stitched_predictions.json").write_text(
-        json.dumps(stitched_predictions)
-    )
-    (output_dir / "per_view_predictions.json").write_text(
-        json.dumps(per_view_predictions)
-    )
+    (output_dir / "stitched_predictions.json").write_text(json.dumps(stitched_predictions))
+    (output_dir / "per_view_predictions.json").write_text(json.dumps(per_view_predictions))
     log.info(
         f"Stitched predictions: {len(stitched_predictions)} | "
         f"Per-view predictions: {len(per_view_predictions)}"
@@ -586,9 +586,7 @@ def main() -> None:
         f"{len(pseudo_gt_dict['annotations'])} annotations "
         f"(per-view preds filtered at score >= {args.pseudo_gt_confidence})"
     )
-    metrics_pseudo = evaluate_coco_predictions(
-        stitched_predictions, coco_pseudo_gt, verbose=True
-    )
+    metrics_pseudo = evaluate_coco_predictions(stitched_predictions, coco_pseudo_gt, verbose=True)
     for key in ("AP", "AP50", "AP75", "AR100"):
         log.info(f"  {key}: {metrics_pseudo[key]:.4f}")
     pr_pseudo = compute_precision_recall(

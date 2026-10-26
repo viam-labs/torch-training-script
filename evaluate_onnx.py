@@ -5,6 +5,7 @@ Evaluate an ONNX object detection model on a test dataset.
 Caches ALL raw predictions (unfiltered) so that metrics can be recomputed
 at any threshold later (e.g., for ROC curves) without re-running inference.
 """
+
 import argparse
 import json
 import logging
@@ -23,7 +24,12 @@ from tqdm import tqdm
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 from utils.coco_converter import jsonl_to_coco
-from utils.coco_eval import compute_det_curves, compute_precision_recall, convert_to_xywh, evaluate_coco_predictions
+from utils.coco_eval import (
+    compute_det_curves,
+    compute_precision_recall,
+    convert_to_xywh,
+    evaluate_coco_predictions,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -37,36 +43,41 @@ def plot_roc_curve(curve_data: dict, output_dir: Path, iou_threshold: float) -> 
     fig, ax = plt.subplots(figsize=(10, 8))
     colors = plt.cm.tab10.colors
 
-    class_names = sorted(curve_data['per_class'].keys())
+    class_names = sorted(curve_data["per_class"].keys())
     for idx, cls_name in enumerate(class_names):
-        cls = curve_data['per_class'][cls_name]
-        if not cls['recall']:
+        cls = curve_data["per_class"][cls_name]
+        if not cls["recall"]:
             continue
         color = colors[idx % len(colors)]
         ax.plot(
-            cls['recall'], cls['precision'],
-            color=color, linewidth=1.5,
+            cls["recall"],
+            cls["precision"],
+            color=color,
+            linewidth=1.5,
             label=f"{cls_name} (AP={cls['ap']:.3f}, n={cls['n_gt']})",
         )
 
-    overall = curve_data['overall']
-    if overall['recall']:
+    overall = curve_data["overall"]
+    if overall["recall"]:
         ax.plot(
-            overall['recall'], overall['precision'],
-            color='black', linewidth=2.5, linestyle='--',
+            overall["recall"],
+            overall["precision"],
+            color="black",
+            linewidth=2.5,
+            linestyle="--",
             label=f"Overall (AP={overall['ap']:.3f}, n={overall['n_gt']})",
         )
 
-    ax.set_xlabel('Recall', fontsize=13)
-    ax.set_ylabel('Precision', fontsize=13)
-    ax.set_title(f'Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})', fontsize=14)
+    ax.set_xlabel("Recall", fontsize=13)
+    ax.set_ylabel("Precision", fontsize=13)
+    ax.set_title(f"Precision\u2013Recall Curve (IoU \u2265 {iou_threshold})", fontsize=14)
     ax.set_xlim([0.0, 1.02])
     ax.set_ylim([0.0, 1.02])
-    ax.legend(loc='lower left', fontsize=10)
+    ax.legend(loc="lower left", fontsize=10)
     ax.grid(True, alpha=0.3)
 
     save_path = output_dir / "precision_recall_curve.png"
-    fig.savefig(save_path, dpi=200, bbox_inches='tight')
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     log.info(f"Saved precision-recall curve to {save_path}")
     return save_path
@@ -107,15 +118,12 @@ def run_inference(
     if expects_float:
         log.info("Model expects float32 input (will convert from uint8)")
 
-    # Build label->category_id mapping (1-based, matching jsonl_to_coco)
-    label_to_id = {name: idx + 1 for idx, name in enumerate(classes)}
-
     jsonl_path = dataset_dir / "dataset.jsonl"
     coco_results = []
     image_count = 0
 
     with open(jsonl_path, "r") as f:
-        lines = [l.strip() for l in f if l.strip()]
+        lines = [ln.strip() for ln in f if ln.strip()]
 
     for image_id, line in enumerate(tqdm(lines, desc="Running inference")):
         sample = json.loads(line)
@@ -254,7 +262,7 @@ def main():
 
     # Read labels
     labels_path = Path(args.labels)
-    classes = [l.strip() for l in labels_path.read_text().splitlines() if l.strip()]
+    classes = [ln.strip() for ln in labels_path.read_text().splitlines() if ln.strip()]
     log.info(f"Classes: {classes}")
 
     # Get model input shape
@@ -306,9 +314,7 @@ def main():
 
     # Compute precision/recall at specified thresholds
     log.info("=" * 60)
-    log.info(
-        f"Precision/Recall (IoU>={args.iou_threshold}, conf>={args.confidence_threshold})"
-    )
+    log.info(f"Precision/Recall (IoU>={args.iou_threshold}, conf>={args.confidence_threshold})")
     log.info("=" * 60)
     pr_results = compute_precision_recall(
         predictions=predictions,
@@ -324,18 +330,14 @@ def main():
     log.info(
         f"  {'Class':<{col_w}s}  {'Prec':>6s}  {'Rec':>6s}  {'F1':>6s}  {'TP':>5s}  {'FP':>5s}  {'FN':>5s}"
     )
-    log.info(
-        f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}"
-    )
+    log.info(f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}")
     for cls_name in class_names:
         c = pr_results["per_class"][cls_name]
         log.info(
             f"  {cls_name:<{col_w}s}  {c['precision']:6.3f}  {c['recall']:6.3f}  "
             f"{c['f1']:6.3f}  {c['tp']:5d}  {c['fp']:5d}  {c['fn']:5d}"
         )
-    log.info(
-        f"  {'-'*col_w}  {'-'*6}  {'-'*6}  {'-'*6}  {'-'*5}  {'-'*5}  {'-'*5}"
-    )
+    log.info(f"  {'-' * col_w}  {'-' * 6}  {'-' * 6}  {'-' * 6}  {'-' * 5}  {'-' * 5}  {'-' * 5}")
     log.info(
         f"  {'OVERALL':<{col_w}s}  {ov['precision']:6.3f}  {ov['recall']:6.3f}  "
         f"{ov['f1']:6.3f}  {ov['tp']:5d}  {ov['fp']:5d}  {ov['fn']:5d}"

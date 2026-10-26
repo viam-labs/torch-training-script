@@ -58,13 +58,15 @@ def load_dataset(dataset_dir: Path) -> list[dict]:
                 if bbox.get("annotation_label")
             ]
 
-            out.append({
-                "binary_data_id": binary_data_id,
-                "image_path": image_path,
-                "labels": labels,
-                "sequence_id": sequence_id,
-                "source_dataset": str(dataset_dir),
-            })
+            out.append(
+                {
+                    "binary_data_id": binary_data_id,
+                    "image_path": image_path,
+                    "labels": labels,
+                    "sequence_id": sequence_id,
+                    "source_dataset": str(dataset_dir),
+                }
+            )
     return out
 
 
@@ -92,9 +94,7 @@ def dedupe(images: list[dict]) -> list[dict]:
     return list(seen.values())
 
 
-def project_split(
-    images: list[dict], val_split: float, seed: int
-) -> tuple[set[str], set[str]]:
+def project_split(images: list[dict], val_split: float, seed: int) -> tuple[set[str], set[str]]:
     """Replicate sequence_aware_split from train.py, but return only the sequence partitions.
 
     Returns (train_seq_ids, val_seq_ids). Images without sequence_id are implicitly train.
@@ -197,16 +197,37 @@ def print_table(title: str, stats: dict[str, dict], show_split: bool = True) -> 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("dataset_dirs", nargs="+", type=Path, help="One or more directories containing dataset.jsonl")
-    parser.add_argument("--others", action="store_true",
-                        help=f"Show only labels that DON'T match prefix '{CLASS_PREFIX}' (sanity check).")
-    parser.add_argument("--test-set", action="store_true",
-                        help="Treat input as a held-out test set: skip the train/val sequence projection.")
-    parser.add_argument("--val-split", type=float, default=0.2,
-                        help="Fraction of images projected into val split (default: 0.2, matches train.yaml).")
-    parser.add_argument("--seed", type=int, default=42,
-                        help="Seed for sequence-aware split projection (default: 42, matches train.yaml).")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "dataset_dirs",
+        nargs="+",
+        type=Path,
+        help="One or more directories containing dataset.jsonl",
+    )
+    parser.add_argument(
+        "--others",
+        action="store_true",
+        help=f"Show only labels that DON'T match prefix '{CLASS_PREFIX}' (sanity check).",
+    )
+    parser.add_argument(
+        "--test-set",
+        action="store_true",
+        help="Treat input as a held-out test set: skip the train/val sequence projection.",
+    )
+    parser.add_argument(
+        "--val-split",
+        type=float,
+        default=0.2,
+        help="Fraction of images projected into val split (default: 0.2, matches train.yaml).",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Seed for sequence-aware split projection (default: 42, matches train.yaml).",
+    )
     args = parser.parse_args()
 
     all_images: list[dict] = []
@@ -235,14 +256,20 @@ def main() -> None:
                 f"{len(train_seqs)} train sequences, {len(val_seqs)} val sequences."
             )
         else:
-            print("No sequence_ids present — train/val projection skipped (all images would land in train).")
+            print(
+                "No sequence_ids present — train/val projection skipped (all images would land in train)."
+            )
 
     stats = compute_class_stats(images, train_seqs, val_seqs)
     show_split = not args.test_set
 
     if args.others:
         others = {k: v for k, v in stats.items() if not k.startswith(CLASS_PREFIX)}
-        print_table(f"Other bbox labels (not matching prefix '{CLASS_PREFIX}')", others, show_split=show_split)
+        print_table(
+            f"Other bbox labels (not matching prefix '{CLASS_PREFIX}')",
+            others,
+            show_split=show_split,
+        )
     else:
         matched = {k: v for k, v in stats.items() if k.startswith(CLASS_PREFIX)}
         print_table(f"Classes (prefix '{CLASS_PREFIX}')", matched, show_split=show_split)

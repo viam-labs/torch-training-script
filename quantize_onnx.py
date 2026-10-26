@@ -7,6 +7,7 @@ activation ranges for accurate quantization. Pre-screens images to
 ensure they produce detections (avoids empty tensor errors in ROI pooling
 observer nodes during calibration).
 """
+
 import argparse
 import json
 import logging
@@ -17,8 +18,6 @@ from pathlib import Path
 
 import numpy as np
 import onnxruntime as ort
-from PIL import Image
-
 from onnxruntime.quantization import (
     CalibrationDataReader,
     CalibrationMethod,
@@ -27,6 +26,7 @@ from onnxruntime.quantization import (
     quantize_static,
 )
 from onnxruntime.quantization.shape_inference import quant_pre_process
+from PIL import Image
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -127,8 +127,7 @@ def _prescreen_calibration_images(
             continue
 
     log.info(
-        f"Found {len(good_images)} images with detections "
-        f"(checked {checked}/{len(candidates)})"
+        f"Found {len(good_images)} images with detections (checked {checked}/{len(candidates)})"
     )
 
     if len(good_images) < num_needed:
@@ -266,11 +265,9 @@ def main():
         nodes_to_exclude = []
         if args.exclude_head:
             import onnx as _onnx
+
             _model = _onnx.load(preprocessed_path)
-            nodes_to_exclude = [
-                n.name for n in _model.graph.node
-                if "head" in n.name
-            ]
+            nodes_to_exclude = [n.name for n in _model.graph.node if "head" in n.name]
             log.info(f"Excluding {len(nodes_to_exclude)} head nodes from quantization")
             del _model
 

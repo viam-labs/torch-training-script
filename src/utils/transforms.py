@@ -8,9 +8,9 @@ import math
 import random
 from typing import Dict, List, Optional, Tuple
 
-import torch
 import cv2
 import numpy as np
+import torch
 import torchvision.transforms.functional as F
 from omegaconf import DictConfig
 
@@ -212,8 +212,10 @@ def move_batch_to_device(
     """
     images = images.to(device, non_blocking=True)
     targets = [
-        {k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
-         for k, v in t.items()}
+        {
+            k: v.to(device, non_blocking=True) if isinstance(v, torch.Tensor) else v
+            for k, v in t.items()
+        }
         for t in targets
     ]
     return images, targets

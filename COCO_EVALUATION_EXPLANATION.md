@@ -28,10 +28,7 @@ scores = scores[mask]
 ```python
 # Collects ALL predictions (no confidence filtering!)
 predictions = collect_predictions(
-    model=model,
-    data_loader=data_loader,
-    device=device,
-    scale_to_original=True
+    model=model, data_loader=data_loader, device=device, scale_to_original=True
 )
 
 # COCO evaluation handles confidence internally

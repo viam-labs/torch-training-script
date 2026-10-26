@@ -10,6 +10,7 @@ Run: .venv/bin/python -m pytest tests/test_collate_pipeline.py -v
 (GPU tests skip automatically on machines without CUDA.)
 
 """
+
 import sys
 from pathlib import Path
 
@@ -26,10 +27,9 @@ def reference_gpu_collate(batch, device):
     images, targets = [], []
     for image, target in batch:
         images.append(image.to(device))
-        targets.append({
-            k: v.to(device) if isinstance(v, torch.Tensor) else v
-            for k, v in target.items()
-        })
+        targets.append(
+            {k: v.to(device) if isinstance(v, torch.Tensor) else v for k, v in target.items()}
+        )
     return torch.stack(images, dim=0), targets
 
 
@@ -115,9 +115,11 @@ class SyntheticDataset(torch.utils.data.Dataset):
         nb = 2 if idx % 3 else 0  # every 3rd item has no boxes
         return (
             torch.rand(3, 64, 64, generator=g),
-            {"boxes": torch.rand(nb, 4, generator=g),
-             "labels": torch.ones(nb, dtype=torch.int64),
-             "image_id": torch.tensor([idx])},
+            {
+                "boxes": torch.rand(nb, 4, generator=g),
+                "labels": torch.ones(nb, dtype=torch.int64),
+                "image_id": torch.tensor([idx]),
+            },
         )
 
 
@@ -132,9 +134,14 @@ def test_dataloader_integration_spawn_workers_pinned():
     pin = torch.cuda.is_available()
     dataset = SyntheticDataset()
     loader = torch.utils.data.DataLoader(
-        dataset, batch_size=4, num_workers=2, shuffle=False,
-        collate_fn=detection_collate, persistent_workers=True,
-        pin_memory=pin, multiprocessing_context="spawn",
+        dataset,
+        batch_size=4,
+        num_workers=2,
+        shuffle=False,
+        collate_fn=detection_collate,
+        persistent_workers=True,
+        pin_memory=pin,
+        multiprocessing_context="spawn",
     )
     for epoch in range(2):  # second pass reuses the persistent workers
         seen = 0

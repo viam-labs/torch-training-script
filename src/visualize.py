@@ -10,6 +10,7 @@ Example:
     python src/visualize.py datasets/my_dataset outputs/18-08-48/eval_my_dataset_best_model_pth \
         --confidence-threshold 0.5 --max-images 20
 """
+
 import argparse
 import json
 import logging
@@ -92,14 +93,14 @@ def draw_image(
         if filter_labels and _cat_name(pred["category_id"]) not in filter_labels:
             continue
         x, y, w, h = pred["bbox"]
-        rect = patches.Rectangle(
-            (x, y), w, h, linewidth=1, edgecolor="r", facecolor="none"
-        )
+        rect = patches.Rectangle((x, y), w, h, linewidth=1, edgecolor="r", facecolor="none")
         ax.add_patch(rect)
         ax.text(
-            x, y - 5,
-            f'{_cat_name(pred["category_id"])} {score:.2f}',
-            color="red", fontsize=7,
+            x,
+            y - 5,
+            f"{_cat_name(pred['category_id'])} {score:.2f}",
+            color="red",
+            fontsize=7,
         )
 
     # Ground truth: lime dashed boxes (COCO bbox format [x, y, w, h])
@@ -108,8 +109,13 @@ def draw_image(
             continue
         x, y, w, h = ann["bbox"]
         rect = patches.Rectangle(
-            (x, y), w, h, linewidth=1,
-            edgecolor="lime", facecolor="none", linestyle="--",
+            (x, y),
+            w,
+            h,
+            linewidth=1,
+            edgecolor="lime",
+            facecolor="none",
+            linestyle="--",
         )
         ax.add_patch(rect)
         ax.text(x, y + h + 12, _cat_name(ann["category_id"]), color="lime", fontsize=7)
@@ -136,31 +142,44 @@ def main():
         help="Path to eval output directory (containing predictions + ground truth JSONs)",
     )
     parser.add_argument(
-        "--confidence-threshold", type=float, default=0.7,
+        "--confidence-threshold",
+        type=float,
+        default=0.7,
         help="Only draw predictions above this score (default: 0.7)",
     )
     parser.add_argument(
-        "--predictions-file", type=Path, default=None,
+        "--predictions-file",
+        type=Path,
+        default=None,
         help="Predictions JSON path (default: auto-detect *_predictions.json in eval_dir)",
     )
     parser.add_argument(
-        "--gt-file", type=Path, default=None,
+        "--gt-file",
+        type=Path,
+        default=None,
         help="Ground truth COCO JSON path (default: auto-detect *_coco.json in eval_dir)",
     )
     parser.add_argument(
-        "--output-dir", type=Path, default=None,
+        "--output-dir",
+        type=Path,
+        default=None,
         help="Output directory for visualizations (default: eval_dir/visualizations/)",
     )
     parser.add_argument(
-        "--max-images", type=int, default=None,
+        "--max-images",
+        type=int,
+        default=None,
         help="Maximum number of images to visualize (default: all)",
     )
     parser.add_argument(
-        "--labels", nargs="+", default=None,
+        "--labels",
+        nargs="+",
+        default=None,
         help="Only draw boxes for these label names (default: all labels)",
     )
     parser.add_argument(
-        "--only-with-predictions", action="store_true",
+        "--only-with-predictions",
+        action="store_true",
         help="Only save images that have at least one prediction above the confidence threshold",
     )
     args = parser.parse_args()
@@ -206,8 +225,10 @@ def main():
     def _cat_name(cat_id):
         return categories.get(cat_id, str(cat_id))
 
-    log.info(f"Loaded {len(images)} images, {len(categories)} categories, "
-             f"{sum(len(v) for v in preds_by_image.values())} predictions")
+    log.info(
+        f"Loaded {len(images)} images, {len(categories)} categories, "
+        f"{sum(len(v) for v in preds_by_image.values())} predictions"
+    )
 
     # --- Draw ---
     image_ids = sorted(images.keys())
