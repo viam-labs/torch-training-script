@@ -28,8 +28,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # The build-action has exited 1 after every platform was built and published
+      # (0.0.4-rc0 to rc3): while it streams the cloud build logs back, one of the
+      # linux jobs emits "Rpc error: ... string field contains invalid UTF-8" and the
+      # action treats that as a failure. The registry is the source of truth, so the
+      # step below is allowed to fail and "Verify published platforms" decides.
       - name: Build and Publish
+        id: build
         if: ${{ github.event_name != 'workflow_dispatch' }}
+        continue-on-error: true
         uses: viamrobotics/build-action@v1.6
         with:
           version: ${{ github.event.release.tag_name }}
@@ -37,6 +44,37 @@ jobs:
           key-id: ${{ secrets.viam_key_id }}
           key-value: ${{ secrets.viam_key_value }}
           token: ${{ github.token }}
+
+      - name: Verify published platforms
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+        run: |
+          set -euo pipefail
+          curl -fsSL -o viam "https://storage.googleapis.com/packages.viam.com/apps/viam-cli/viam-cli-stable-linux-amd64"
+          chmod +x viam
+          ./viam login api-key --key-id "${{ secrets.viam_key_id }}" --key "${{ secrets.viam_key_value }}"
+          MODULE_ID="$(jq -r .module_id meta.json)"
+          missing=0
+          for platform in $(jq -r '.build.arch[]' meta.json); do
+            dest="/tmp/verify/${platform//\//-}"
+            mkdir -p "$dest"
+            if ./viam module download --id "$MODULE_ID" --version "$VERSION" --platform "$platform" --destination "$dest" >/dev/null 2>&1 \
+               && find "$dest" -name '*.tar.gz' | grep -q .; then
+              echo "ok      $platform"
+            else
+              echo "MISSING $platform"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::$MODULE_ID $VERSION is missing at least one platform in the registry"
+            exit 1
+          fi
+          if [ "$BUILD_OUTCOME" != "success" ]; then
+            echo "::notice::build-action exited with '$BUILD_OUTCOME' but every platform in meta.json is published; treating the release as successful"
+          fi
 
   publish-windows:
     needs: validate-tag

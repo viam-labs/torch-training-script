@@ -1,0 +1,13 @@
+# Keep text files LF on every platform. The Windows release job checks out
+# this repo with autocrlf, and `viam module upload` then fails to match the
+# README anchor in meta.json's markdown_link ("section #viam-config not found")
+# because the heading it slugifies ends in a carriage return. Bash scripts and
+# Makefiles are included for the same reason.
+*.md       text eol=lf
+*.sh       text eol=lf
+*.json     text eol=lf
+*.toml     text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
+*.py       text eol=lf
+Makefile   text eol=lf
