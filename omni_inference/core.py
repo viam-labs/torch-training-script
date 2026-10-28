@@ -23,6 +23,9 @@ Expected ONNX model contract (from convert_to_onnx.py):
             position 2 — float32 [N]   confidence scores (output NAME is misleading)
 """
 
+import importlib.util
+import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Union
@@ -34,6 +37,37 @@ from PIL import Image
 
 # Input tensor name matching convert_to_onnx.py.
 ONNX_INPUT_NAME = "image"
+
+
+def _provider_name(provider: Any) -> str:
+    """onnxruntime accepts a provider as a name or a ``(name, options)`` tuple."""
+    return provider[0] if isinstance(provider, (tuple, list)) else str(provider)
+
+
+def _add_openvino_dll_dir() -> Optional[str]:
+    """Make ``openvino.dll`` findable for onnxruntime's OpenVINO provider on Windows.
+
+    ``onnxruntime_providers_openvino.dll`` is loaded by onnxruntime at session
+    creation and links against ``openvino.dll`` from the separate ``openvino``
+    package, which lives in ``<site-packages>/openvino/libs`` and is not on the
+    DLL search path. Without this the provider fails to load ("Error 126") and
+    onnxruntime silently runs on CPU. onnxruntime ships a helper for this
+    (``onnxruntime.tools.add_openvino_win_libs``) but it hardcodes
+    ``site.getsitepackages()`` and calls ``sys.exit`` on failure, so it does not
+    work inside a PyInstaller bundle; resolving the package location through
+    ``importlib`` does. Returns the directory added, or None when not applicable.
+    """
+    if sys.platform != "win32":
+        return None
+    spec = importlib.util.find_spec("openvino")
+    if spec is None or not spec.origin:
+        return None
+    libs = Path(spec.origin).parent / "libs"
+    if not libs.is_dir():
+        return None
+    os.environ["PATH"] = f"{libs}{os.pathsep}{os.environ.get('PATH', '')}"
+    os.add_dll_directory(str(libs))
+    return str(libs)
 
 # NOTE: The ONNX output names from convert_to_onnx.py are misleading.
 # The model returns (boxes, labels_float, scores) but the export names them:
@@ -92,6 +126,10 @@ class OmniOnnxInference:
 
         if providers is None:
             providers = ["CPUExecutionProvider"]
+        # Where openvino.dll was made findable (Windows + OpenVINO provider only), for logging.
+        self.openvino_dll_dir: Optional[str] = None
+        if any(_provider_name(p) == "OpenVINOExecutionProvider" for p in providers):
+            self.openvino_dll_dir = _add_openvino_dll_dir()
         self.session = ort.InferenceSession(model_path, providers=providers)
         # What onnxruntime actually picked (a requested provider that is not
         # installed is silently skipped, so callers should log this).

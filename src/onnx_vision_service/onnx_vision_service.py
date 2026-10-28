@@ -217,6 +217,11 @@ class OnnxVisionService(Vision, Reconfigurable):
             f"Execution provider requested: {execution_provider} "
             f"(openvino_device={openvino_device}); "
             f"active onnxruntime providers: {self.inference.active_providers}"
+            + (
+                f"; openvino DLL dir: {self.inference.openvino_dll_dir}"
+                if self.inference.openvino_dll_dir
+                else ""
+            )
         )
         if execution_provider == "openvino" and not any(
             p == "OpenVINOExecutionProvider" for p in self.inference.active_providers
