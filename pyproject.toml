@@ -62,7 +62,7 @@ sweep = [
 
 # ONNX Vision Service module (lightweight, no PyTorch)
 vision-service = [
-    "viam-sdk>=0.80.0",
+    "viam-sdk>=0.85.2",
     # onnxruntime-openvino is a drop-in onnxruntime build that adds the
     # OpenVINOExecutionProvider (Intel CPU/iGPU/NPU). Wheels exist only for
     # x86_64 Linux (bundling the OpenVINO runtime) and Windows (which needs
